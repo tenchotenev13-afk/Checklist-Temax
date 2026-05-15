@@ -306,23 +306,43 @@ function printDashboardEntry(idx) {
 }
 
 function loadData() {
-  document.getElementById('tabContent').innerHTML='<div class="loading"><div class="spinner"></div><div style="font-size:13px;color:var(--slate)">Зареждане…</div></div>';
-  const old=document.getElementById('_jsonp'); if(old) old.remove();
-  const cb='_cb'+Date.now();
-  window[cb]=function(json){
-    delete window[cb];
-    const s=document.getElementById('_jsonp'); if(s) s.remove();
-    if(json&&json.status==='ok'&&json.data){
-      allData=json.data;
-      document.getElementById('lastUpd').textContent='Обновено: '+new Date().toLocaleTimeString('bg-BG')+' · '+allData.length+' проверки';
-      try{ buildShopFilter(); applyFilters(); }
-      catch(err){ showError('Грешка при визуализация: '+err.message); console.error(err); }
-    } else { showError('Грешка: '+(json&&json.message||'неизвестна')); }
-  };
-  const s=document.createElement('script'); s.id='_jsonp';
-  s.src=SHEETS_URL+'?action=getAll&callback='+cb;
-  s.onerror=()=>showError('Не може да се свърже. Проверете Apps Script деплоя.');
-  document.head.appendChild(s);
+  var step='init';
+  try {
+    step='spinner';
+    document.getElementById('tabContent').innerHTML='<div class="loading"><div class="spinner"></div><div style="font-size:13px;color:var(--slate)">Зареждане…</div></div>';
+    step='remove-old';
+    const old=document.getElementById('_jsonp'); if(old) old.remove();
+    step='callback-name';
+    const cb='_cb'+Date.now();
+    step='define-callback';
+    window[cb]=function(json){
+      try {
+        delete window[cb];
+        const s=document.getElementById('_jsonp'); if(s) s.remove();
+        if(json&&json.status==='ok'&&json.data){
+          allData=json.data;
+          var lastUpdEl=document.getElementById('lastUpd');
+          if(lastUpdEl) lastUpdEl.textContent='Обновено: '+new Date().toLocaleTimeString('bg-BG')+' · '+allData.length+' проверки';
+          buildShopFilter();
+          applyFilters();
+        } else {
+          showError('Грешка от API: '+(json&&json.message||JSON.stringify(json)));
+        }
+      } catch(cbErr) {
+        showError('Грешка при обработка: '+cbErr.message+' | stack: '+cbErr.stack);
+        console.error('Callback error:', cbErr);
+      }
+    };
+    step='create-script';
+    const s=document.createElement('script'); s.id='_jsonp';
+    s.src=SHEETS_URL+'?action=getAll&callback='+cb;
+    s.onerror=function(e){ showError('Script грешка — не може да се зареди Apps Script. URL: '+SHEETS_URL.slice(0,60)); };
+    step='append-script';
+    document.head.appendChild(s);
+  } catch(loadErr) {
+    showError('Грешка в loadData (стъпка: '+step+'): '+loadErr.message);
+    console.error('loadData error at step '+step+':', loadErr);
+  }
 }
 
 function showError(msg){
