@@ -688,7 +688,16 @@ function pctColor(p){
   if(p===null||p===undefined) return'var(--slate)';
   return p>=85?'var(--green)':p>=60?'#D97706':'var(--red)';
 }
-function fmtDate(d){if(!d) return'—'; return String(d).slice(0,10);}
+function fmtDate(d){
+  if(!d) return '—';
+  var s = String(d);
+  // Ако е ISO timestamp (2026-05-11T21:00:00.000Z), конвертираме към локална дата
+  if(s.length > 10 && s.indexOf('T') > 0) {
+    var dt = new Date(s);
+    return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+  }
+  return s.slice(0,10);
+}
 
 document.getElementById('ftAll').className='filter-tag on';
 loadData();
