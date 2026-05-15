@@ -1,0 +1,25 @@
+{
+  "name": "ТеМАХ Табло — Директор",
+  "short_name": "ТеМАХ Табло",
+  "description": "Директорско табло за анализ на качеството в магазините на ТеМАХ",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#0D1B2A",
+  "theme_color": "#0D1B2A",
+  "start_url": "/Checklist-Temax/dashboard.html",
+  "scope": "/Checklist-Temax/",
+  "icons": [
+    {
+      "src": "logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
