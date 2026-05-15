@@ -1,0 +1,25 @@
+{
+  "name": "ТеМАХ Контролна карта",
+  "short_name": "ТеМАХ",
+  "description": "Система за контрол на качеството в магазините на ТеМАХ",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0D1B2A",
+  "theme_color": "#0D1B2A",
+  "start_url": "/Checklist-Temax/",
+  "scope": "/Checklist-Temax/",
+  "icons": [
+    {
+      "src": "logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
