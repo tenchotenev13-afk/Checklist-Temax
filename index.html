@@ -855,9 +855,10 @@ function saveCheck() {
     avgPct: pct, bonusOk, blockFail: blockingFail,
     blocking: state.blocking,
     sectorData,
-    notes: notesArr.join(' | '),
-    repeatIssues: repeatArr.join(', '),
-    deadlines: deadlineArr.join(' | '),
+    // Лимит: Apps Script URL параметри имат ~4KB лимит след декодиране
+    notes: notesArr.join(' | ').slice(0, 600),
+    repeatIssues: repeatArr.join(', ').slice(0, 250),
+    deadlines: deadlineArr.join(' | ').slice(0, 250),
   };
   const emailTo = document.getElementById('reportEmail').value.trim();
   const pctVal  = pct !== null ? Math.round(pct * 100) : null;
@@ -870,6 +871,8 @@ function saveCheck() {
 
     if (!r || r.status !== 'ok') {
       console.warn('Грешка при запис:', r && r.message);
+      alert('⚠️ Данните не са записани в базата!\nМоля свържете се с администратора.\nГрешка: ' + (r && r.message || 'Timeout'));
+      return;
     }
 
     // Изпращаме имейл САМО след потвърждение, че данните са записани
@@ -897,10 +900,30 @@ function saveCheck() {
     }
   };
 
+  // Таймаут — ако след 15 сек. няма потвърждение, предупреждаваме
+  const saveTimeout = setTimeout(function() {
+    if (window[saveCbName]) {
+      delete window[saveCbName];
+      console.warn('Save timeout — Apps Script не отговори');
+      // НЕ показваме alert тук — потребителят вече е видял "запазено"
+    }
+  }, 15000);
+
+  const origCb = window[saveCbName];
+  window[saveCbName] = function(r) {
+    clearTimeout(saveTimeout);
+    origCb(r);
+  };
+
   const saveScript = document.createElement('script');
   saveScript.id = '_saveJsonp';
-  saveScript.src = sheetsUrl + '?data=' + encodeURIComponent(JSON.stringify(leanPayload)) + '&callback=' + saveCbName;
-  saveScript.onerror = function() { console.warn('Script грешка при запис'); };
+  const saveUrl = sheetsUrl + '?data=' + encodeURIComponent(JSON.stringify(leanPayload)) + '&callback=' + saveCbName;
+  console.log('Save URL дължина:', saveUrl.length, 'символа');
+  saveScript.src = saveUrl;
+  saveScript.onerror = function() {
+    clearTimeout(saveTimeout);
+    console.warn('Script load грешка при запис');
+  };
   document.head.appendChild(saveScript);
 
   alert(`✅ Проверката е запазена!\n${shop} — ${date}\nОбща оценка: ${pctVal!==null?pctVal+'%':'—'}\n${bonusOk?'✅ Бонус одобрен':'✗ Без бонус'}`);
