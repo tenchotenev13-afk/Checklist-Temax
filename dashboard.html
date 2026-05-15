@@ -305,43 +305,46 @@ function printDashboardEntry(idx) {
   pw.document.close();
 }
 
-function loadData() {
-  var step='init';
+async function loadData() {
+  document.getElementById('tabContent').innerHTML='<div class="loading"><div class="spinner"></div><div style="font-size:13px;color:var(--slate)">Зареждане…</div></div>';
   try {
-    step='spinner';
-    document.getElementById('tabContent').innerHTML='<div class="loading"><div class="spinner"></div><div style="font-size:13px;color:var(--slate)">Зареждане…</div></div>';
-    step='remove-old';
+    // Опит 1: fetch() с CORS
+    const response = await fetch(SHEETS_URL+'?action=getAll', {
+      method:'GET', cache:'no-cache'
+    });
+    const json = await response.json();
+    if(json&&json.status==='ok'&&json.data){
+      allData=json.data;
+      var el=document.getElementById('lastUpd');
+      if(el) el.textContent='Обновено: '+new Date().toLocaleTimeString('bg-BG')+' · '+allData.length+' проверки';
+      try{ buildShopFilter(); applyFilters(); }
+      catch(renderErr){ showError('Грешка при визуализация: '+renderErr.message); }
+    } else {
+      showError('Грешка от API: '+(json&&json.message||'неизвестна'));
+    }
+  } catch(fetchErr) {
+    // Опит 2: JSONP (fallback)
+    console.warn('fetch() неуспешен, опитвам JSONP:', fetchErr.message);
     const old=document.getElementById('_jsonp'); if(old) old.remove();
-    step='callback-name';
     const cb='_cb'+Date.now();
-    step='define-callback';
     window[cb]=function(json){
       try {
         delete window[cb];
         const s=document.getElementById('_jsonp'); if(s) s.remove();
         if(json&&json.status==='ok'&&json.data){
           allData=json.data;
-          var lastUpdEl=document.getElementById('lastUpd');
-          if(lastUpdEl) lastUpdEl.textContent='Обновено: '+new Date().toLocaleTimeString('bg-BG')+' · '+allData.length+' проверки';
-          buildShopFilter();
-          applyFilters();
+          var el=document.getElementById('lastUpd');
+          if(el) el.textContent='Обновено: '+new Date().toLocaleTimeString('bg-BG')+' · '+allData.length+' проверки';
+          buildShopFilter(); applyFilters();
         } else {
-          showError('Грешка от API: '+(json&&json.message||JSON.stringify(json)));
+          showError('JSONP грешка: '+(json&&json.message||'неизвестна'));
         }
-      } catch(cbErr) {
-        showError('Грешка при обработка: '+cbErr.message+' | stack: '+cbErr.stack);
-        console.error('Callback error:', cbErr);
-      }
+      } catch(e){ showError('Грешка: '+e.message); }
     };
-    step='create-script';
     const s=document.createElement('script'); s.id='_jsonp';
     s.src=SHEETS_URL+'?action=getAll&callback='+cb;
-    s.onerror=function(e){ showError('Script грешка — не може да се зареди Apps Script. URL: '+SHEETS_URL.slice(0,60)); };
-    step='append-script';
+    s.onerror=()=>showError('Не може да се свърже с Apps Script. Проверете деплоя.');
     document.head.appendChild(s);
-  } catch(loadErr) {
-    showError('Грешка в loadData (стъпка: '+step+'): '+loadErr.message);
-    console.error('loadData error at step '+step+':', loadErr);
   }
 }
 
