@@ -189,7 +189,11 @@ body{font-family:'IBM Plex Sans',sans-serif;background:#F1F3F5;color:var(--text)
   </div>
   <div class="formula-note">Формула: Сектор % = СРЕДНО(Общи %, Специфични %) · Обща оценка = СРЕДНО на 17 сектора</div>
   <div id="checkContent"></div>
-  <div class="save-bar">
+  <div class="free-comment-section" style="margin:16px 0 8px;padding:14px 16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px">
+    <label style="font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:8px">Допълнителни бележки за проверката <span style="font-weight:400;color:#94A3B8">(незадължително)</span></label>
+    <textarea id="generalComment" rows="3" placeholder="Общо впечатление, извънредни обстоятелства, положителни наблюдения..." style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;font-family:inherit;color:#374151;background:#fff;resize:vertical;min-height:80px;outline:none" onfocus="this.style.borderColor='#3B5BDB'" onblur="this.style.borderColor='#E2E8F0'"></textarea>
+  </div>
+<div class="save-bar">
     <button class="btn-save" onclick="saveCheck()">💾 Запази проверката</button>
     <button class="btn-clear" onclick="clearCheck()">✕ Изчисти</button>
   </div>
@@ -857,6 +861,7 @@ function saveCheck() {
     sectorData,
     // Лимит: Apps Script URL параметри имат ~4KB лимит след декодиране
     notes: notesArr.join(' | ').slice(0, 600),
+    generalComment: (document.getElementById('generalComment').value || '').trim().slice(0, 400),
     repeatIssues: repeatArr.join(', ').slice(0, 250),
     deadlines: deadlineArr.join(' | ').slice(0, 250),
   };
@@ -928,6 +933,7 @@ function saveCheck() {
 
   alert(`✅ Проверката е запазена!\n${shop} — ${date}\nОбща оценка: ${pctVal!==null?pctVal+'%':'—'}\n${bonusOk?'✅ Бонус одобрен':'✗ Без бонус'}`);
 
+  document.getElementById('generalComment').value = '';
   renderHistory();
   showPrevInfo();
 }
@@ -1141,7 +1147,7 @@ function generatePDF() {
 </tr></thead><tbody>${sectorRows}</tbody></table>
 ${notesHtml?`<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;margin-bottom:5px">Забележки</div><div style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px;margin-bottom:14px">${notesHtml}</div>`:''}
 <div style="margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:10px;color:#94A3B8;display:flex;justify-content:space-between">
-  <span>ТеМАХ · Контролна карта · ${new Date().toLocaleDateString('bg-BG')}</span><span>Генерирано: ${new Date().toLocaleString('bg-BG')}</span>
+  ${state.generalComment ? `<div style='margin:0 0 14px'><div style='font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:6px'>Допълнителни бележки</div><div style='padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;color:#374151;white-space:pre-wrap'>${state.generalComment}</div></div>` : ''}<span>ТеМАХ · Контролна карта · ${new Date().toLocaleDateString('bg-BG')}</span><span>Генерирано: ${new Date().toLocaleString('bg-BG')}</span>
 </div>
 <div style="margin-top:16px;text-align:center;display:flex;gap:10px;justify-content:center">
   <button onclick="window.print()" style="padding:10px 24px;background:#0D1B2A;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">🖨️ Печат / Запази PDF</button>
