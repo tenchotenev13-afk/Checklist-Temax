@@ -23,7 +23,7 @@ var COL_BLOCK_START    = 59;  // Блок.1
 var COL_NOTES          = 63;
 var COL_REPEAT         = 64;
 var COL_DEADLINE       = 65;
-var TOTAL_COLS         = 65;
+var TOTAL_COLS         = 66; // 65 данни + колона 66 за снимки (Cloudinary URLs)
 
 // ── MAIN ENTRY POINT ────────────────────────────────────────────
 function doGet(e) {
@@ -101,6 +101,9 @@ function doGet(e) {
         var shop    = e.parameter.shop || '';
         var date    = e.parameter.date || '';
         var manager = e.parameter.manager || '';
+        var photosParam = e.parameter.photos || '';
+        var photosFromParam = {};
+        try { if (photosParam) photosFromParam = JSON.parse(photosParam); } catch(pe) {}
         if (!to) return sendJSON({status:'error', message:'Липсва имейл адрес'}, cb);
 
         // Четем данните от Sheets
@@ -189,6 +192,10 @@ function doGet(e) {
         var photosRaw = entry?(entry[65]||''):'';
         var photosObj = {};
         try { if(photosRaw) photosObj = JSON.parse(photosRaw); } catch(e) {}
+        // Обединяваме снимки от Sheets + директно от параметъра
+        Object.keys(photosFromParam).forEach(function(sid){
+          if (!photosObj[sid]) photosObj[sid] = photosFromParam[sid];
+        });
         var repeats   = entry?(entry[COL_REPEAT-1]||''):'';
         var deadlines = entry?(entry[COL_DEADLINE-1]||''):'';
 
@@ -295,19 +302,26 @@ function doGet(e) {
         var shopP   = e.parameter.shop || '';
         var dateP   = e.parameter.date || '';
         var photosJ = e.parameter.photos || '{}';
+        var newPhotos = JSON.parse(photosJ);
         var ss3     = SpreadsheetApp.openById(SS_ID);
         var sheet3  = ss3.getSheetByName(SS_RAW);
         if (sheet3 && sheet3.getLastRow() > 1) {
-          var lastC3 = sheet3.getLastColumn();
-          var rows3  = sheet3.getRange(2, 1, sheet3.getLastRow()-1, Math.min(lastC3, 3)).getValues();
+          var rows3 = sheet3.getRange(2, 1, sheet3.getLastRow()-1, 3).getValues();
           for (var ri3 = rows3.length - 1; ri3 >= 0; ri3--) {
             var rd3 = rows3[ri3][2];
             if (rd3 instanceof Date) rd3 = Utilities.formatDate(rd3, Session.getScriptTimeZone(), 'yyyy-MM-dd');
             else rd3 = String(rd3).slice(0,10);
             if (String(rows3[ri3][1]).trim() === shopP.trim() && rd3 === dateP) {
-              // Expand to col 66 if needed
               if (sheet3.getMaxColumns() < 66) sheet3.insertColumnsAfter(sheet3.getMaxColumns(), 66 - sheet3.getMaxColumns());
-              sheet3.getRange(ri3 + 2, 66).setValue(photosJ);
+              // Merge с вече записани снимки (изпращаме по 1 сектор)
+              var cell = sheet3.getRange(ri3 + 2, 66);
+              var existing = {};
+              try { var ev = cell.getValue(); if (ev) existing = JSON.parse(ev); } catch(pe) {}
+              var keys = Object.keys(newPhotos);
+              for (var ki = 0; ki < keys.length; ki++) {
+                existing[keys[ki]] = newPhotos[keys[ki]];
+              }
+              cell.setValue(JSON.stringify(existing));
               return sendJSON({status:'ok', message:'Снимките са записани'}, cb);
             }
           }
@@ -368,9 +382,8 @@ function doPost(e) {
       return output;
     }
 
-    // Default: save checklist data
-    writeRow(body);
-    output = ContentService.createTextOutput(JSON.stringify({status:'ok'}));
+    // doPost се използва само за addPhotos — не записваме редове
+    output = ContentService.createTextOutput(JSON.stringify({status:'ignored'}));
     output.setMimeType(ContentService.MimeType.JSON);
     return output;
   } catch(err) {

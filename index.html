@@ -964,6 +964,7 @@ function saveCheck() {
     id: entryId, shop, date, manager,
     pct, bonusOk, blockingFail, sectorResults,
     state: JSON.parse(JSON.stringify(state)),
+    photos: JSON.parse(JSON.stringify(state.photos || {})), // запазваме URLs локално
     ts: new Date().toISOString(),
     synced: false,
   };
@@ -1042,20 +1043,32 @@ function saveCheck() {
           }
         };
         const emailScript = document.createElement('script');
+        // Включваме снимки от photosToSend (max 3 на сектор за URL лимит)
+        const autoPhotosSample = {};
+        Object.keys(photosToSend).forEach(sid => {
+          if (photosToSend[sid] && photosToSend[sid].length)
+            autoPhotosSample[sid] = photosToSend[sid].slice(0, 3);
+        });
+        const autoPhotosParam = Object.keys(autoPhotosSample).length
+          ? '&photos=' + encodeURIComponent(JSON.stringify(autoPhotosSample))
+          : '';
         emailScript.src = sheetsUrl
           + '?action=sendEmail'
           + '&to='      + encodeURIComponent(emailTo)
           + '&shop='    + encodeURIComponent(shop)
           + '&date='    + encodeURIComponent(date)
           + '&manager=' + encodeURIComponent(manager)
+          + autoPhotosParam
           + '&callback=' + emailCb;
         document.head.appendChild(emailScript);
-      }, 4000); // 4 секунди — за да се запишат данните в Sheets преди lookup
+      }, 15000); // 15 секунди — след като снимките са записани в Sheets
     }
   };
 
   // Запазваме копие на снимките ПРЕДИ да се изчистят от state
   const photosToSend = JSON.parse(JSON.stringify(state.photos || {}));
+  const photoSectors = Object.keys(photosToSend).filter(s => photosToSend[s] && photosToSend[s].length);
+  console.log('[ТеМАХ] Снимки при запазване:', photoSectors.length, 'сектора:', photoSectors.join(', '));
 
   // Таймаут — ако след 15 сек. няма потвърждение, предупреждаваме
   const saveTimeout = setTimeout(function() {
@@ -1072,6 +1085,11 @@ function saveCheck() {
     origCb(r);
   };
 
+  // Предотвратяваме двоен запис ако вече има активна заявка
+  if (document.getElementById('_saveJsonp')) {
+    console.warn('[ТеМАХ] Вече има активна save заявка — прекратяваме');
+    return;
+  }
   const saveScript = document.createElement('script');
   saveScript.id = '_saveJsonp';
   const saveUrl = sheetsUrl + '?data=' + encodeURIComponent(JSON.stringify(leanPayload)) + '&callback=' + saveCbName;
@@ -1152,11 +1170,23 @@ async function uploadToCloudinary(file, sid, shop, date) {
   const fd = new FormData();
   fd.append('file', compressed, file.name);
   fd.append('upload_preset', CLOUDINARY_PRESET);
-  fd.append('folder', 'temax/' + (shop||'').replace(/[^a-zA-Z0-9а-яА-Я]/g,'_') + '/' + (date||'').replace(/-/g,''));
+
+  // Използваме public_id за гарантирана структура:
+  // temax/Кърджали/2026-06-16/s3_1718553600000
+  const safeShop = (shop || 'Неизвестен').trim();
+  const safeDate = (date || new Date().toISOString().slice(0,10));
+  const publicId = 'temax/' + safeShop + '/' + safeDate + '/' + sid + '_' + Date.now();
+
+  fd.append('public_id', publicId);
+  fd.append('folder', 'temax/' + safeShop + '/' + safeDate); // и двете за съвместимост
+
+  console.log('[ТеМАХ] Cloudinary folder:', 'temax/' + safeShop + '/' + safeDate);
+
   const resp = await fetch('https://api.cloudinary.com/v1_1/' + CLOUDINARY_CLOUD + '/image/upload', {
     method: 'POST', body: fd
   });
   const data = await resp.json();
+  console.log('[ТеМАХ] Cloudinary response public_id:', data.public_id);
   if (!data.secure_url) throw new Error(data.error && data.error.message || 'Upload failed');
   return data.secure_url;
 }
@@ -1203,43 +1233,60 @@ function removePhoto(sid, url, thumbEl) {
 
 function sendPhotosToSheets(shop, date, photos) {
   if (!photos || !Object.keys(photos).length) return;
+  // Филтрираме само сектори със снимки
   const filtered = {};
   Object.keys(photos).forEach(sid => {
     if (photos[sid] && photos[sid].length) filtered[sid] = photos[sid];
   });
-  if (!Object.keys(filtered).length) return;
+  const sids = Object.keys(filtered);
+  if (!sids.length) return;
 
-  // POST с no-cors — няма URL лимит, работи дори без CORS headers
-  const payload = JSON.stringify({
-    action: 'addPhotos',
-    shop: shop,
-    date: date,
-    photos: filtered
-  });
+  console.log('[ТеМАХ] Изпращане на снимки за', sids.length, 'сектора...');
+  showSyncNotification('📷 Снимките се изпращат (' + sids.length + ' сектора)...', 'warning');
 
-  fetch(SHEETS_URL, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: { 'Content-Type': 'text/plain' },
-    body: payload
-  }).then(() => {
-    console.log('[ТеМАХ] Снимките са изпратени към Sheets');
-  }).catch(err => {
-    console.warn('[ТеМАХ] Грешка при изпращане на снимки:', err);
-    // Fallback: JSONP за малко количество снимки
-    const total = Object.values(filtered).reduce((a, arr) => a + arr.length, 0);
-    if (total <= 10) {
-      const cb = '_ph_' + Date.now();
-      window[cb] = function(r) { delete window[cb]; };
-      const sc = document.createElement('script');
-      sc.src = SHEETS_URL + '?action=addPhotos'
-        + '&shop=' + encodeURIComponent(shop)
-        + '&date=' + encodeURIComponent(date)
-        + '&photos=' + encodeURIComponent(JSON.stringify(filtered))
-        + '&callback=' + cb;
-      document.head.appendChild(sc);
+  // Изпращаме по 1 сектор наведнъж (малки URL-ове, надеждно)
+  let idx = 0;
+  function sendNextSector() {
+    if (idx >= sids.length) {
+      console.log('[ТеМАХ] Всички снимки са изпратени в Sheets');
+    showSyncNotification('📷 Снимките са записани успешно!', 'success');
+      return;
     }
-  });
+    const sid = sids[idx++];
+    const sectorPhotos = {};
+    sectorPhotos[sid] = filtered[sid];
+
+    const cb = '_ph_' + Date.now() + '_' + idx;
+    window[cb] = function(r) {
+      const sc = document.getElementById(cb);
+      if (sc) sc.remove();
+      delete window[cb];
+      if (r && r.status === 'ok') {
+        console.log('[ТеМАХ] Сектор', sid, '→ Sheets ✅');
+      } else {
+        console.warn('[ТеМАХ] Сектор', sid, '→ грешка:', r && r.message);
+      }
+      setTimeout(sendNextSector, 300); // следващ сектор след 300мс
+    };
+
+    const sc = document.createElement('script');
+    sc.id = cb;
+    sc.src = SHEETS_URL
+      + '?action=addPhotos'
+      + '&shop=' + encodeURIComponent(shop)
+      + '&date=' + encodeURIComponent(date)
+      + '&photos=' + encodeURIComponent(JSON.stringify(sectorPhotos))
+      + '&callback=' + cb;
+    sc.onerror = function() {
+      if (sc.parentNode) sc.remove();
+      delete window[cb];
+      console.warn('[ТеМАХ] Сектор', sid, '→ onerror');
+      setTimeout(sendNextSector, 300);
+    };
+    document.head.appendChild(sc);
+  }
+
+  sendNextSector();
 }
 
 // Render photo previews for a sector (called on restore draft)
@@ -1367,12 +1414,24 @@ function resendEmail(entryTs) {
     }
   };
   const sc = document.createElement('script');
+  // Включваме снимките от localStorage (до 10 URL-а за да не надвиши URL лимита)
+  const entryPhotos = entry.photos || {};
+  const photosSample = {};
+  Object.keys(entryPhotos).forEach(sid => {
+    if (entryPhotos[sid] && entryPhotos[sid].length) {
+      photosSample[sid] = entryPhotos[sid].slice(0, 3); // max 3 снимки на сектор
+    }
+  });
+  const photosParam = Object.keys(photosSample).length
+    ? '&photos=' + encodeURIComponent(JSON.stringify(photosSample))
+    : '';
   sc.src = SHEETS_URL
     + '?action=sendEmail'
     + '&to=' + encodeURIComponent(emailTo)
     + '&shop=' + encodeURIComponent(entry.shop)
     + '&date=' + encodeURIComponent(entry.date)
     + '&manager=' + encodeURIComponent(entry.manager || '')
+    + photosParam
     + '&callback=' + cbName;
   sc.onerror = function() { showSyncNotification('❌ Не може да се свърже.', 'error'); };
   document.head.appendChild(sc);
