@@ -1074,63 +1074,85 @@ let activeShopFilter = 'ALL';
 
 // ── Повторно изпращане към Sheets ────────────────────────────────
 function resendToSheets(entryTs) {
-  const history = loadHistory();
-  const entry = history.find(e => e.id === entryTs || e.ts === entryTs || String(e.id) === String(entryTs));
-  if (!entry) { alert('Проверката не е намерена локално.'); return; }
+  try {
+    const history = loadHistory();
+    const entry = history.find(e =>
+      e.id === entryTs || e.ts === entryTs ||
+      String(e.id) === String(entryTs)
+    );
+    if (!entry) { alert('Проверката не е намерена локално.'); return; }
 
-  const s = document.getElementById('shop') || {};
-  const shopKey = 'temax_' + entry.shop;
-
-  // Rebuild leanPayload from localStorage entry
-  const notesArr = [], repeatArr = [], deadlineArr = [];
-  if (entry.state && entry.state.notes) {
-    Object.keys(entry.state.notes).forEach(k => {
-      if (entry.state.notes[k]) notesArr.push(criterionLabel(k) + ': ' + entry.state.notes[k]);
-    });
-  }
-  if (entry.state && entry.state.repeatIssues) {
-    Object.keys(entry.state.repeatIssues).forEach(k => {
-      if (entry.state.repeatIssues[k]) repeatArr.push(criterionLabel(k));
-    });
-  }
-  if (entry.state && entry.state.deadlines) {
-    Object.keys(entry.state.deadlines).forEach(k => {
-      if (entry.state.deadlines[k]) deadlineArr.push(criterionLabel(k) + ': ' + entry.state.deadlines[k]);
-    });
-  }
-
-  const leanPayload = {
-    shop: entry.shop,
-    date: entry.date,
-    manager: entry.manager || '',
-    savedAt: entry.ts,
-    avgPct: entry.pct,
-    bonusOk: entry.bonusOk,
-    blockFail: entry.blockFail || false,
-    blocking: (entry.state && entry.state.blocking) || {},
-    sectorData: entry.sectorData || {},
-    notes: notesArr.join(' | ').slice(0, 600),
-    repeatIssues: repeatArr.join(', ').slice(0, 250),
-    deadlines: deadlineArr.join(' | ').slice(0, 250),
-    generalComment: entry.generalComment || '',
-  };
-
-  const cbName = '_resend_' + Date.now();
-  window[cbName] = function(r) {
-    delete window[cbName];
-    if (r && r.status === 'ok') {
-      updateEntrySyncStatus(shopKey, entryTs, true);
-      renderHistory();
-      showSyncNotification('✅ Проверката е изпратена успешно в базата!', 'success');
-    } else {
-      showSyncNotification('❌ Грешка: ' + (r && r.message || 'Неуспешно'), 'error');
+    // Rebuild notes from state
+    const notesArr = [], repeatArr = [], deadlineArr = [];
+    if (entry.state && entry.state.notes) {
+      Object.keys(entry.state.notes).forEach(k => {
+        if (entry.state.notes[k]) notesArr.push(criterionLabel(k) + ': ' + entry.state.notes[k]);
+      });
     }
-  };
-  const sc = document.createElement('script');
-  sc.src = sheetsUrl + '?data=' + encodeURIComponent(JSON.stringify(leanPayload)) + '&callback=' + cbName;
-  sc.onerror = function() { showSyncNotification('❌ Не може да се свърже с Apps Script.', 'error'); };
-  document.head.appendChild(sc);
-  showSyncNotification('⏳ Изпращане...', 'warning');
+    if (entry.state && entry.state.repeatIssues) {
+      Object.keys(entry.state.repeatIssues).forEach(k => {
+        if (entry.state.repeatIssues[k]) repeatArr.push(criterionLabel(k));
+      });
+    }
+    if (entry.state && entry.state.deadlines) {
+      Object.keys(entry.state.deadlines).forEach(k => {
+        if (entry.state.deadlines[k]) deadlineArr.push(criterionLabel(k) + ': ' + entry.state.deadlines[k]);
+      });
+    }
+
+    // Convert sectorResults → sectorData format
+    const sectorData = {};
+    if (entry.sectorResults) {
+      Object.keys(entry.sectorResults).forEach(sid => {
+        const sr = entry.sectorResults[sid];
+        if (sr) sectorData[sid] = {
+          combinedPct: sr.pct !== undefined ? sr.pct : (sr.combinedPct || null),
+          genPct:      sr.genPct  !== undefined ? sr.genPct  : null,
+          specPct:     sr.specPct !== undefined ? sr.specPct : null,
+        };
+      });
+    }
+
+    const leanPayload = {
+      shop:          entry.shop,
+      date:          entry.date,
+      manager:       entry.manager || '',
+      savedAt:       entry.id || entry.ts,
+      avgPct:        entry.pct,
+      bonusOk:       entry.bonusOk,
+      blockFail:     entry.blockingFail || entry.blockFail || false,
+      blocking:      (entry.state && entry.state.blocking) || {},
+      sectorData:    sectorData,
+      notes:         notesArr.join(' | ').slice(0, 600),
+      repeatIssues:  repeatArr.join(', ').slice(0, 250),
+      deadlines:     deadlineArr.join(' | ').slice(0, 250),
+      generalComment: entry.generalComment || '',
+    };
+
+    const cbName = '_resend_' + Date.now();
+    window[cbName] = function(r) {
+      delete window[cbName];
+      if (r && r.status === 'ok') {
+        updateEntrySyncStatus('checklist_history', entryTs, true);
+        renderHistory();
+        showSyncNotification('✅ Проверката е изпратена успешно в базата!', 'success');
+      } else {
+        showSyncNotification('❌ Грешка при изпращане: ' + (r && r.message || 'Неуспешно'), 'error');
+      }
+    };
+
+    const sc = document.createElement('script');
+    sc.src = sheetsUrl + '?data=' + encodeURIComponent(JSON.stringify(leanPayload)) + '&callback=' + cbName;
+    sc.onerror = function() {
+      showSyncNotification('❌ Не може да се свърже с Apps Script.', 'error');
+    };
+    document.head.appendChild(sc);
+    showSyncNotification('⏳ Изпращане към базата...', 'warning');
+
+  } catch(err) {
+    showSyncNotification('❌ Грешка: ' + err.message, 'error');
+    console.error('resendToSheets error:', err);
+  }
 }
 
 // ── Повторно изпращане на имейл ──────────────────────────────────
