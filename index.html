@@ -806,6 +806,101 @@ function validateCheck() {
   return errors;
 }
 
+
+// ── Известие за статус на запис ──────────────────────────────
+
+// ── Авто-запазване на чернова ─────────────────────────────────
+var autosaveInterval = null;
+
+function saveDraft() {
+  try {
+    const shop = document.getElementById('shop').value.trim();
+    if (!shop) return; // Не запазваме без магазин
+    const draft = {
+      ts: Date.now(),
+      shop,
+      date: document.getElementById('checkDate').value,
+      manager: document.getElementById('manager').value,
+      email: document.getElementById('reportEmail').value,
+      generalComment: (document.getElementById('generalComment') || {}).value || '',
+      state: JSON.parse(JSON.stringify(state)),
+    };
+    localStorage.setItem('temax_draft', JSON.stringify(draft));
+  } catch(e) {}
+}
+
+function clearDraft() {
+  localStorage.removeItem('temax_draft');
+}
+
+function startAutosave() {
+  if (autosaveInterval) clearInterval(autosaveInterval);
+  autosaveInterval = setInterval(saveDraft, 60000); // на 60 сек.
+}
+
+function checkDraft() {
+  try {
+    const raw = localStorage.getItem('temax_draft');
+    if (!raw) return;
+    const draft = JSON.parse(raw);
+    const age = Date.now() - draft.ts;
+    if (age > 24 * 60 * 60 * 1000) { // по-стара от 24ч → изтриваме
+      clearDraft(); return;
+    }
+    const mins = Math.round(age / 60000);
+    const timeAgo = mins < 1 ? 'преди малко' : `преди ${mins} мин.`;
+    const restore = confirm(`Намерена е незапазена проверка за "${draft.shop}" (${timeAgo}).\nИскате ли да я възстановите?`);
+    if (restore) {
+      document.getElementById('shop').value = draft.shop || '';
+      document.getElementById('checkDate').value = draft.date || '';
+      document.getElementById('manager').value = draft.manager || '';
+      document.getElementById('reportEmail').value = draft.email || '';
+      if (document.getElementById('generalComment')) {
+        document.getElementById('generalComment').value = draft.generalComment || '';
+      }
+      if (draft.state) {
+        Object.assign(state, draft.state);
+        renderAll && renderAll();
+      }
+      showSyncNotification('✅ Черновата е възстановена.', 'success');
+    } else {
+      clearDraft();
+    }
+  } catch(e) {}
+}
+
+function showSyncNotification(msg, type) {
+  const existing = document.getElementById('syncNotif');
+  if (existing) existing.remove();
+  const colors = {
+    success: {bg:'#E6F9F1', border:'#0A7C59', color:'#0A7C59'},
+    warning: {bg:'#FEF3C7', border:'#B45309', color:'#B45309'},
+    error:   {bg:'#FDE8E8', border:'#C0392B', color:'#C0392B'},
+  };
+  const c = colors[type] || colors.warning;
+  const el = document.createElement('div');
+  el.id = 'syncNotif';
+  el.style.cssText = `position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:9999;
+    background:${c.bg};border:1.5px solid ${c.border};border-radius:10px;padding:10px 18px;
+    font-size:13px;font-weight:600;color:${c.color};max-width:90vw;text-align:center;
+    box-shadow:0 4px 16px rgba(0,0,0,.12)`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 5000);
+}
+
+function updateEntrySyncStatus(shopKey, entryTs, synced) {
+  try {
+    const history = loadHistory();
+    // Match by id (number) or ts (string)
+    const idx = history.findIndex(e => e.id === entryTs || e.ts === entryTs || String(e.id) === String(entryTs));
+    if (idx >= 0) {
+      history[idx].synced = synced;
+      localStorage.setItem('checklist_history', JSON.stringify(history));
+    }
+  } catch(e) {}
+}
+
 function saveCheck() {
   const shop = document.getElementById('shopName').value.trim();
   const date = document.getElementById('checkDate').value;
@@ -823,11 +918,13 @@ function saveCheck() {
   const sectorResults = {};
   SECTORS.forEach(s => { sectorResults[s.id] = getSectorScore(s); });
 
+  const entryId = Date.now();
   const entry = {
-    id: Date.now(), shop, date, manager,
+    id: entryId, shop, date, manager,
     pct, bonusOk, blockingFail, sectorResults,
     state: JSON.parse(JSON.stringify(state)),
     ts: new Date().toISOString(),
+    synced: false,
   };
 
   let history = loadHistory();
@@ -876,9 +973,15 @@ function saveCheck() {
 
     if (!r || r.status !== 'ok') {
       console.warn('Грешка при запис:', r && r.message);
-      alert('⚠️ Данните не са записани в базата!\nМоля свържете се с администратора.\nГрешка: ' + (r && r.message || 'Timeout'));
+      updateEntrySyncStatus('checklist_history', entryId, false);
+      renderHistory();
+      showSyncNotification('⚠️ Запазено само на устройството. Използвайте История → Изпрати отново.', 'warning');
       return;
     }
+    // Успешно записано в Sheets
+    updateEntrySyncStatus('checklist_history', entryId, true);
+    renderHistory();
+    showSyncNotification('✅ Изпратено успешно в базата!', 'success');
 
     // Изпращаме имейл САМО след потвърждение, че данните са записани
     if (emailTo && pctVal !== null) {
@@ -933,6 +1036,7 @@ function saveCheck() {
 
   alert(`✅ Проверката е запазена!\n${shop} — ${date}\nОбща оценка: ${pctVal!==null?pctVal+'%':'—'}\n${bonusOk?'✅ Бонус одобрен':'✗ Без бонус'}`);
 
+  clearDraft();
   document.getElementById('generalComment').value = '';
   renderHistory();
   showPrevInfo();
@@ -948,6 +1052,8 @@ function clearCheck() {
   buildCheckUI();
   document.getElementById('shopName').value = '';
   document.getElementById('checkDate').value = new Date().toISOString().slice(0,10);
+  checkDraft();
+  startAutosave();
   document.getElementById('managerName').value = '';
 }
 
@@ -964,6 +1070,102 @@ function showPrevInfo() {
 // ИСТОРИЯ
 // ═══════════════════════════════════════════════════════════
 let activeShopFilter = 'ALL';
+
+
+// ── Повторно изпращане към Sheets ────────────────────────────────
+function resendToSheets(entryTs) {
+  const history = loadHistory();
+  const entry = history.find(e => e.id === entryTs || e.ts === entryTs || String(e.id) === String(entryTs));
+  if (!entry) { alert('Проверката не е намерена локално.'); return; }
+
+  const s = document.getElementById('shop') || {};
+  const shopKey = 'temax_' + entry.shop;
+
+  // Rebuild leanPayload from localStorage entry
+  const notesArr = [], repeatArr = [], deadlineArr = [];
+  if (entry.state && entry.state.notes) {
+    Object.keys(entry.state.notes).forEach(k => {
+      if (entry.state.notes[k]) notesArr.push(criterionLabel(k) + ': ' + entry.state.notes[k]);
+    });
+  }
+  if (entry.state && entry.state.repeatIssues) {
+    Object.keys(entry.state.repeatIssues).forEach(k => {
+      if (entry.state.repeatIssues[k]) repeatArr.push(criterionLabel(k));
+    });
+  }
+  if (entry.state && entry.state.deadlines) {
+    Object.keys(entry.state.deadlines).forEach(k => {
+      if (entry.state.deadlines[k]) deadlineArr.push(criterionLabel(k) + ': ' + entry.state.deadlines[k]);
+    });
+  }
+
+  const leanPayload = {
+    shop: entry.shop,
+    date: entry.date,
+    manager: entry.manager || '',
+    savedAt: entry.ts,
+    avgPct: entry.pct,
+    bonusOk: entry.bonusOk,
+    blockFail: entry.blockFail || false,
+    blocking: (entry.state && entry.state.blocking) || {},
+    sectorData: entry.sectorData || {},
+    notes: notesArr.join(' | ').slice(0, 600),
+    repeatIssues: repeatArr.join(', ').slice(0, 250),
+    deadlines: deadlineArr.join(' | ').slice(0, 250),
+    generalComment: entry.generalComment || '',
+  };
+
+  const cbName = '_resend_' + Date.now();
+  window[cbName] = function(r) {
+    delete window[cbName];
+    if (r && r.status === 'ok') {
+      updateEntrySyncStatus(shopKey, entryTs, true);
+      renderHistory();
+      showSyncNotification('✅ Проверката е изпратена успешно в базата!', 'success');
+    } else {
+      showSyncNotification('❌ Грешка: ' + (r && r.message || 'Неуспешно'), 'error');
+    }
+  };
+  const sc = document.createElement('script');
+  sc.src = sheetsUrl + '?data=' + encodeURIComponent(JSON.stringify(leanPayload)) + '&callback=' + cbName;
+  sc.onerror = function() { showSyncNotification('❌ Не може да се свърже с Apps Script.', 'error'); };
+  document.head.appendChild(sc);
+  showSyncNotification('⏳ Изпращане...', 'warning');
+}
+
+// ── Повторно изпращане на имейл ──────────────────────────────────
+function resendEmail(entryTs) {
+  const history = loadHistory();
+  const entry = history.find(e => e.id === entryTs || e.ts === entryTs || String(e.id) === String(entryTs));
+  if (!entry) return;
+
+  const emailTo = prompt('Въведете имейл адрес за изпращане:', '');
+  if (!emailTo || !emailTo.includes('@')) {
+    if (emailTo !== null) alert('Невалиден имейл адрес.');
+    return;
+  }
+
+  const cbName = '_remail_' + Date.now();
+  window[cbName] = function(r) {
+    delete window[cbName];
+    if (r && r.status === 'ok') {
+      showSyncNotification('✅ Имейлът е изпратен към ' + emailTo, 'success');
+    } else {
+      showSyncNotification('❌ Грешка при имейл: ' + (r && r.message || 'Неуспешно'), 'error');
+    }
+  };
+  const sc = document.createElement('script');
+  sc.src = sheetsUrl
+    + '?action=sendEmail'
+    + '&to=' + encodeURIComponent(emailTo)
+    + '&shop=' + encodeURIComponent(entry.shop)
+    + '&date=' + encodeURIComponent(entry.date)
+    + '&manager=' + encodeURIComponent(entry.manager || '')
+    + '&callback=' + cbName;
+  sc.onerror = function() { showSyncNotification('❌ Не може да се свърже.', 'error'); };
+  document.head.appendChild(sc);
+  showSyncNotification('⏳ Изпращане на имейл...', 'warning');
+}
 
 function renderHistory() {
   const history = loadHistory();
@@ -1016,6 +1218,18 @@ function renderHistory() {
     const repeatLines = Object.keys(savedRepeat).filter(k=>savedRepeat[k]==='Y').map(k=>`🔁 <i>Повторна грешка:</i> ${criterionLabel(k)}`);
     const allNotes = [...notesLines, ...repeatLines];
     if (allNotes.length) html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--slate-l);font-size:11px;line-height:1.6;color:var(--slate)">${allNotes.join('<br>')}</div>`;
+    // Sync статус и бутони
+    const isSynced = entry.synced === true;
+    const syncBadge = isSynced
+      ? `<span style="color:#0A7C59;font-size:11px;font-weight:600">✅ В базата</span>`
+      : `<span style="color:#B45309;font-size:11px;font-weight:600">⚠️ Само локална</span>`;
+    html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+      <div>${syncBadge}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${!isSynced ? `<button onclick="resendToSheets(${entry.id})" style="padding:4px 10px;background:#3B5BDB;border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">🔄 Изпрати в базата</button>` : ''}
+        <button onclick="resendEmail(${entry.id})" style="padding:4px 10px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;color:#fff;font-size:11px;cursor:pointer">📧 Имейл</button>
+      </div>
+    </div>`;
     html += `</div></div>`;
   });
 
