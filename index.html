@@ -218,6 +218,8 @@ body{font-family:'IBM Plex Sans',sans-serif;background:#F1F3F5;color:var(--text)
 </div>
 
 <script>
+const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbyi0HloLVLVR4AVkq--GpqQpXoz2-J7UirNOMt5ROdzP1bmNsrulVEW26A5aHhnHs4U/exec';
+
 // ═══════════════════════════════════════════════════════════
 // ДАННИ — съответстват точно на Excel файла
 // ═══════════════════════════════════════════════════════════
@@ -870,6 +872,7 @@ function checkDraft() {
 }
 
 function showSyncNotification(msg, type) {
+  console.log('[ТеМАХ Sync]', type, msg);
   const existing = document.getElementById('syncNotif');
   if (existing) existing.remove();
   const colors = {
@@ -880,13 +883,27 @@ function showSyncNotification(msg, type) {
   const c = colors[type] || colors.warning;
   const el = document.createElement('div');
   el.id = 'syncNotif';
-  el.style.cssText = `position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:9999;
-    background:${c.bg};border:1.5px solid ${c.border};border-radius:10px;padding:10px 18px;
-    font-size:13px;font-weight:600;color:${c.color};max-width:90vw;text-align:center;
-    box-shadow:0 4px 16px rgba(0,0,0,.12)`;
+  el.style.cssText = [
+    'position:fixed',
+    'top:20px',
+    'left:50%',
+    'transform:translateX(-50%)',
+    'z-index:99999',
+    `background:${c.bg}`,
+    `border:2px solid ${c.border}`,
+    'border-radius:12px',
+    'padding:14px 24px',
+    'font-size:14px',
+    'font-weight:700',
+    `color:${c.color}`,
+    'max-width:90vw',
+    'text-align:center',
+    'box-shadow:0 8px 24px rgba(0,0,0,.2)',
+    'min-width:280px',
+  ].join(';');
   el.textContent = msg;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 5000);
+  setTimeout(() => { if(el.parentNode) el.remove(); }, 6000);
 }
 
 function updateEntrySyncStatus(shopKey, entryTs, synced) {
@@ -1076,10 +1093,12 @@ let activeShopFilter = 'ALL';
 function resendToSheets(entryTs) {
   try {
     const history = loadHistory();
-    const entry = history.find(e =>
-      e.id === entryTs || e.ts === entryTs ||
-      String(e.id) === String(entryTs)
-    );
+    // entryTs може да е ISO string (стари записи) или число (нови)
+  const entry = history.find(e =>
+    e.ts === entryTs ||
+    String(e.id) === String(entryTs) ||
+    e.id === entryTs
+  );
     if (!entry) { alert('Проверката не е намерена локално.'); return; }
 
     // Rebuild notes from state
@@ -1142,7 +1161,7 @@ function resendToSheets(entryTs) {
     };
 
     const sc = document.createElement('script');
-    sc.src = sheetsUrl + '?data=' + encodeURIComponent(JSON.stringify(leanPayload)) + '&callback=' + cbName;
+    sc.src = SHEETS_URL + '?data=' + encodeURIComponent(JSON.stringify(leanPayload)) + '&callback=' + cbName;
     sc.onerror = function() {
       showSyncNotification('❌ Не може да се свърже с Apps Script.', 'error');
     };
@@ -1158,8 +1177,12 @@ function resendToSheets(entryTs) {
 // ── Повторно изпращане на имейл ──────────────────────────────────
 function resendEmail(entryTs) {
   const history = loadHistory();
-  const entry = history.find(e => e.id === entryTs || e.ts === entryTs || String(e.id) === String(entryTs));
-  if (!entry) return;
+  const entry = history.find(e =>
+    e.ts === entryTs ||
+    String(e.id) === String(entryTs) ||
+    e.id === entryTs
+  );
+  if (!entry) { alert('Проверката не е намерена.'); return; }
 
   const emailTo = prompt('Въведете имейл адрес за изпращане:', '');
   if (!emailTo || !emailTo.includes('@')) {
@@ -1177,7 +1200,7 @@ function resendEmail(entryTs) {
     }
   };
   const sc = document.createElement('script');
-  sc.src = sheetsUrl
+  sc.src = SHEETS_URL
     + '?action=sendEmail'
     + '&to=' + encodeURIComponent(emailTo)
     + '&shop=' + encodeURIComponent(entry.shop)
@@ -1248,8 +1271,8 @@ function renderHistory() {
     html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
       <div>${syncBadge}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${!isSynced ? `<button onclick="resendToSheets(${entry.id})" style="padding:4px 10px;background:#3B5BDB;border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">🔄 Изпрати в базата</button>` : ''}
-        <button onclick="resendEmail(${entry.id})" style="padding:4px 10px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;color:#fff;font-size:11px;cursor:pointer">📧 Имейл</button>
+        ${!isSynced ? `<button data-ets="${entry.ts||entry.id||''}" onclick="resendToSheets(this.getAttribute('data-ets'))" style="padding:4px 10px;background:#3B5BDB;border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">🔄 Изпрати в базата</button>` : ''}
+        <button data-ets="${entry.ts||entry.id||''}" onclick="resendEmail(this.getAttribute('data-ets'))" style="padding:4px 10px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;color:#fff;font-size:11px;cursor:pointer">📧 Имейл</button>
       </div>
     </div>`;
     html += `</div></div>`;
