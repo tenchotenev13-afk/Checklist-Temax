@@ -486,7 +486,7 @@ function renderTable(){
     +thSort('date','Дата')+thSort('shop','Магазин')+thSort('manager','Управител')
     +thSort('overallPct','Обща %')+'<th>Бонус</th>'
     +(fSec?'<th>'+SEC_NAMES[fSec]+'</th>':'')
-    +'<th>Блокиращ</th><th>Забележки</th><th>Повт. грешка</th><th>Срок/Отг.</th>'
+    +'<th>Блокиращ</th><th>Забележки</th><th>Повт. грешка</th><th>Срок/Отг.</th><th>Снимки</th>'
     +'</tr></thead><tbody>';
 
   const sorted=[...filtered].sort((a,b)=>{
@@ -510,7 +510,13 @@ function renderTable(){
       +'<td class="td-note" title="'+(d.notes||'')+'">'+( d.notes&&d.notes!=='-'?d.notes:'—')+'</td>'
       +'<td>'+( d.repeatIssues&&d.repeatIssues!=='-'?'<span style="color:var(--red);font-weight:600">ДА</span>':'—')+'</td>'
       +'<td class="td-note" title="'+(d.deadlines||'')+'">'+( d.deadlines&&d.deadlines!=='-'?d.deadlines:'—')+'</td>'
-      +'</tr>';
+      +'<td style="white-space:nowrap;font-size:11px">'+(function(){
+        if(!d.photos||!Object.keys(d.photos).length) return '—';
+        const sids=Object.keys(d.photos).filter(sid=>d.photos[sid]&&d.photos[sid].length);
+        if(!sids.length) return '—';
+        return sids.map(sid=>'<a href="'+d.photos[sid][0]+'" target="_blank" style="color:#3B5BDB;text-decoration:none">📷'+sid.replace('s','')+'('+d.photos[sid].length+')</a>').join(' ');
+      })()+' </td>'+
+      '</tr>';
   });
   h+='</tbody></table></div>';
   document.getElementById('tabContent').innerHTML=h;

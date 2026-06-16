@@ -186,6 +186,9 @@ function doGet(e) {
         }
 
         var notes     = entry?(entry[COL_NOTES-1]||''):'';
+        var photosRaw = entry?(entry[65]||''):'';
+        var photosObj = {};
+        try { if(photosRaw) photosObj = JSON.parse(photosRaw); } catch(e) {}
         var repeats   = entry?(entry[COL_REPEAT-1]||''):'';
         var deadlines = entry?(entry[COL_DEADLINE-1]||''):'';
 
@@ -256,6 +259,26 @@ function doGet(e) {
           +'<th style="padding:7px 10px;font-size:10px;color:#94A3B8;text-align:left;font-weight:700;text-transform:uppercase">Статус</th>'
           +'</tr>'+secRows+'</table>'
           +'<div style="padding:14px;border:1px solid #E2E8F0;border-top:none">'+notesHtml
+          +(Object.keys(photosObj).length ? (function(){
+            var secNames2 = ['Плочки и ламинат','Строителство','Баня и ВиК','Текстил',
+              'Подови настилки','Дом. потреби','Бои и облицовки','Ел. и градин. машини',
+              'Градина','Градин. мебели','Крепежи, обков и врати','Входна зона и фасада',
+              'Вътрешен склад','Външен склад','Плац','Касова зона и бюра','Осветление'];
+            var ph = '<div style="margin-top:14px"><div style="font-size:11px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">📷 Снимки по сектори</div>';
+            var sids = Object.keys(photosObj).filter(function(sid){ return photosObj[sid]&&photosObj[sid].length; });
+            sids.forEach(function(sid){
+              var num = parseInt(sid.replace('s',''),10);
+              var name = secNames2[num-1] || sid;
+              ph += '<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">'+name+'</div>';
+              ph += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+              photosObj[sid].forEach(function(url){
+                ph += '<a href="'+url+'" target="_blank"><img src="'+url+'" style="width:120px;height:90px;object-fit:cover;border-radius:4px;border:1px solid #E2E8F0"></a>';
+              });
+              ph += '</div></div>';
+            });
+            ph += '</div>';
+            return ph;
+          })() : '')
           +'<p style="margin-top:14px;font-size:10px;color:#94A3B8">Изпратено автоматично от ТеМАХ Контролна карта · TeMAX</p>'
           +'</div></div>';
 
