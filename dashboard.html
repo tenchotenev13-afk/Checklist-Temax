@@ -280,7 +280,7 @@ function printDashboardEntry(idx) {
     + '<table style="margin-bottom:14px"><tr>'
     + '<td style="padding:6px 8px;background:#F8FAFC;border:1px solid #e2e8f0;width:33%"><div style="font-size:9px;font-weight:700;color:#64748B;text-transform:uppercase">Магазин</div><div style="font-size:14px;font-weight:700;margin-top:2px">' + d.shop + '</div></td>'
     + '<td style="padding:6px 8px;background:#F8FAFC;border:1px solid #e2e8f0;width:33%"><div style="font-size:9px;font-weight:700;color:#64748B;text-transform:uppercase">Дата</div><div style="font-size:14px;font-weight:700;margin-top:2px">' + fmtDate(d.date) + '</div></td>'
-    + '<td style="padding:6px 8px;background:#F8FAFC;border:1px solid #e2e8f0;width:33%"><div style="font-size:9px;font-weight:700;color:#64748B;text-transform:uppercase">Управител</div><div style="font-size:14px;font-weight:700;margin-top:2px">' + (d.manager || '—') + '</div></td>'
+    + '<td style="padding:6px 8px;background:#F8FAFC;border:1px solid #e2e8f0;width:33%"><div style="font-size:9px;font-weight:700;color:#64748B;text-transform:uppercase">Управител</div><div style="font-size:14px;font-weight:700;margin-top:2px">' + (String(d.manager||'') || '—') + '</div></td>'
     + '</tr></table>'
     + '<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;margin-bottom:5px">Резултати по сектори</div>'
     + '<table style="border:1px solid #e2e8f0;overflow:hidden;margin-bottom:14px">'
@@ -303,47 +303,34 @@ function printDashboardEntry(idx) {
   pw.document.close();
 }
 
-async function loadData() {
+function loadData() {
   document.getElementById('tabContent').innerHTML='<div class="loading"><div class="spinner"></div><div style="font-size:13px;color:var(--slate)">Зареждане…</div></div>';
-  try {
-    // Опит 1: fetch() с CORS
-    const response = await fetch(SHEETS_URL+'?action=getAll', {
-      method:'GET', cache:'no-cache'
-    });
-    const json = await response.json();
-    if(json&&json.status==='ok'&&json.data){
-      allData=json.data;
-      var el=document.getElementById('lastUpd');
-      if(el) el.textContent='Обновено: '+new Date().toLocaleTimeString('bg-BG')+' · '+allData.length+' проверки';
-      try{ buildShopFilter(); applyFilters(); }
-      catch(renderErr){ showError('Грешка при визуализация: '+renderErr.message); }
-    } else {
-      showError('Грешка от API: '+(json&&json.message||'неизвестна'));
+  const old=document.getElementById('_jsonp'); if(old) old.remove();
+  const cb='_cb'+Date.now();
+  window[cb]=function(json){
+    try {
+      delete window[cb];
+      const s=document.getElementById('_jsonp'); if(s) s.remove();
+      if(json&&json.status==='ok'&&json.data){
+        allData=json.data;
+        const el=document.getElementById('lastUpd');
+        if(el) el.textContent='Обновено: '+new Date().toLocaleTimeString('bg-BG')+' · '+allData.length+' проверки';
+        buildShopFilter();
+        applyFilters();
+      } else {
+        showError('Грешка от API: '+(json&&json.message||'неизвестна'));
+      }
+    } catch(e){
+      showError('Грешка при визуализация: '+e.message);
+      console.error(e);
     }
-  } catch(fetchErr) {
-    // Опит 2: JSONP (fallback)
-    console.warn('fetch() неуспешен, опитвам JSONP:', fetchErr.message);
-    const old=document.getElementById('_jsonp'); if(old) old.remove();
-    const cb='_cb'+Date.now();
-    window[cb]=function(json){
-      try {
-        delete window[cb];
-        const s=document.getElementById('_jsonp'); if(s) s.remove();
-        if(json&&json.status==='ok'&&json.data){
-          allData=json.data;
-          var el=document.getElementById('lastUpd');
-          if(el) el.textContent='Обновено: '+new Date().toLocaleTimeString('bg-BG')+' · '+allData.length+' проверки';
-          buildShopFilter(); applyFilters();
-        } else {
-          showError('JSONP грешка: '+(json&&json.message||'неизвестна'));
-        }
-      } catch(e){ showError('Грешка: '+e.message); }
-    };
-    const s=document.createElement('script'); s.id='_jsonp';
-    s.src=SHEETS_URL+'?action=getAll&callback='+cb;
-    s.onerror=()=>showError('Не може да се свърже с Apps Script. Проверете деплоя.');
-    document.head.appendChild(s);
-  }
+  };
+  const s=document.createElement('script'); s.id='_jsonp';
+  s.src=SHEETS_URL+'?action=getAll&callback='+cb;
+  s.onerror=function(){
+    showError('⚠ Apps Script не отговаря. Проверете дали деплоят е активен и достъпен за всички.');
+  };
+  document.head.appendChild(s);
 }
 
 function showError(msg){
@@ -398,7 +385,7 @@ function applyFilters(){
 }
 
 function matchSearch(d,q){
-  return [d.shop,d.manager,d.notes,d.repeatIssues,d.deadlines].some(f=>f&&f.toLowerCase().includes(q));
+  return [d.shop,String(d.manager||''),d.notes,d.repeatIssues,d.deadlines].some(f=>f&&f.toLowerCase().includes(q));
 }
 
 function clearFilters(){
@@ -483,7 +470,7 @@ function renderOverview(){
       +'<span style="font-size:10px;color:var(--slate)">'+fmtDate(d.date)+'</span>'
       +'<span class="td-mono" style="min-width:44px;text-align:right;color:'+pctColor(p)+'">'+( p!==null?p+'%':'—')+'</span>'
       +'<span class="td-badge '+(d.bonusOk?'b-ok':'b-no')+'">'+( d.bonusOk?'✅':'✗')+'</span>'
-      +'<button data-shop="'+d.shop.replace(/"/g,'&quot;')+'" data-date="'+d.date+'" onclick="printByShopDate(this.dataset.shop,this.dataset.date)" style="padding:6px 14px;background:var(--indigo);border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">📄 PDF</button>'
+      +'<button data-shop="'+String(d.shop||'').replace(/"/g,'&quot;')+'" data-date="'+String(d.date||'')+'" onclick="printByShopDate(this.dataset.shop,this.dataset.date)" style="padding:6px 14px;background:var(--indigo);border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">📄 PDF</button>'
       +'</div>';
   });
   h+='</div>';
@@ -515,7 +502,7 @@ function renderTable(){
     h+='<tr class="'+rc+'">'
       +'<td>'+fmtDate(d.date)+'</td>'
       +'<td style="font-weight:600">'+d.shop+'</td>'
-      +'<td>'+( d.manager||'—')+'</td>'
+      +'<td>'+( String(d.manager||'')||'—')+'</td>'
       +'<td class="td-mono" style="color:'+pctColor(p)+'">'+( p!==null?p+'%':'—')+'</td>'
       +'<td><span class="td-badge '+(d.bonusOk?'b-ok':'b-no')+'">'+( d.bonusOk?'✅':'✗')+'</span></td>'
       +(fSec?'<td class="td-mono" style="color:'+pctColor(sp)+'">'+( sp!==null?sp+'%':'—')+'</td>':'')
@@ -647,7 +634,7 @@ function renderNotes(){
     h+='<div class="note-item'+(hasRepeat?' has-repeat':'')+'">'
       +'<div class="note-meta"><span class="note-shop">'+d.shop+'</span>'
       +'<span class="note-date">'+fmtDate(d.date)+'</span>'
-      +(d.manager?'<span style="font-size:11px;color:var(--slate)">'+d.manager+'</span>':'')
+      +(String(d.manager||'')?'<span style="font-size:11px;color:var(--slate)">'+String(d.manager||'')+'</span>':'')
       +'<span class="td-badge '+(d.bonusOk?'b-ok':'b-no')+'">'+( d.bonusOk?'✅':'✗')+'</span>'
       +(d.overallPct!==null?'<span class="td-mono" style="font-size:12px;color:'+pctColor(d.overallPct)+'">'+d.overallPct+'%</span>':'')
       +'</div>';

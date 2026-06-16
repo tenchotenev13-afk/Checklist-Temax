@@ -266,6 +266,35 @@ function doGet(e) {
       }
     }
 
+    // Записване на снимки — ?action=addPhotos&shop=...&date=...&photos=...
+    if (action === 'addPhotos') {
+      try {
+        var shopP   = e.parameter.shop || '';
+        var dateP   = e.parameter.date || '';
+        var photosJ = e.parameter.photos || '{}';
+        var ss3     = SpreadsheetApp.openById(SS_ID);
+        var sheet3  = ss3.getSheetByName(SS_RAW);
+        if (sheet3 && sheet3.getLastRow() > 1) {
+          var lastC3 = sheet3.getLastColumn();
+          var rows3  = sheet3.getRange(2, 1, sheet3.getLastRow()-1, Math.min(lastC3, 3)).getValues();
+          for (var ri3 = rows3.length - 1; ri3 >= 0; ri3--) {
+            var rd3 = rows3[ri3][2];
+            if (rd3 instanceof Date) rd3 = Utilities.formatDate(rd3, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+            else rd3 = String(rd3).slice(0,10);
+            if (String(rows3[ri3][1]).trim() === shopP.trim() && rd3 === dateP) {
+              // Expand to col 66 if needed
+              if (sheet3.getMaxColumns() < 66) sheet3.insertColumnsAfter(sheet3.getMaxColumns(), 66 - sheet3.getMaxColumns());
+              sheet3.getRange(ri3 + 2, 66).setValue(photosJ);
+              return sendJSON({status:'ok', message:'Снимките са записани'}, cb);
+            }
+          }
+        }
+        return sendJSON({status:'error', message:'Записът не е намерен'}, cb);
+      } catch(err) {
+        return sendJSON({status:'error', message:'Грешка: ' + err.toString()}, cb);
+      }
+    }
+
     // Проверка дали API работи
     return sendJSON({status:'ok', message:'ТеМАХ API е активен!'}, cb);
 
@@ -357,6 +386,7 @@ function getAllRows() {
         notes:        r[COL_NOTES    - 1] || '',
         repeatIssues: r[COL_REPEAT   - 1] || '',
         deadlines:    r[COL_DEADLINE - 1] || '',
+        photos:       (function(v){ try{ return v ? JSON.parse(v) : {}; } catch(e){ return {}; } })(r[65]),
       };
     });
 

@@ -131,6 +131,12 @@ body{font-family:'IBM Plex Sans',sans-serif;background:#F1F3F5;color:var(--text)
 .pdf-btn{background:var(--navy);color:#fff;border:none;border-radius:50px;padding:10px 16px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.25);display:flex;align-items:center;gap:6px;transition:all .15s}
 .pdf-btn:hover{background:var(--indigo);transform:translateY(-2px)}
 @media(min-width:600px){.topbar-inner{padding:14px 24px}.info-panel{margin:16px 24px}.section-hdr,.blocking-banner,.criteria-card{margin-left:24px;margin-right:24px}.kpi-grid{grid-template-columns:repeat(4,1fr)}.history-sectors{grid-template-columns:repeat(3,1fr)}.save-bar{padding:14px 24px}.summary-view,.history-view{padding:16px 24px}}
+
+  .photo-preview { display:flex; flex-wrap:wrap; gap:6px; }
+  .photo-thumb { position:relative; border-radius:6px; overflow:visible; }
+  .photo-thumb img { display:block; border:2px solid #E2E8F0; }
+  .thumb-spinner { width:72px; height:72px; display:flex; align-items:center; justify-content:center;
+    background:#F8FAFC; border:2px dashed #CBD5E1; border-radius:6px; font-size:20px; }
 </style>
 </head>
 <body>
@@ -219,6 +225,8 @@ body{font-family:'IBM Plex Sans',sans-serif;background:#F1F3F5;color:var(--text)
 
 <script>
 const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbyi0HloLVLVR4AVkq--GpqQpXoz2-J7UirNOMt5ROdzP1bmNsrulVEW26A5aHhnHs4U/exec';
+const CLOUDINARY_CLOUD = 'dcmwgwwur';
+const CLOUDINARY_PRESET = 'temax_upload';
 
 // ═══════════════════════════════════════════════════════════
 // ДАННИ — съответстват точно на Excel файла
@@ -381,7 +389,7 @@ const SECTORS = [
 // ═══════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════
-let state = { blocking:{}, general:{}, specific:{}, notes:{}, repeat:{}, deadline:{} };
+let state = { blocking:{}, general:{}, specific:{}, notes:{}, repeat:{}, deadline:{}, photos:{} };
 
 // ═══════════════════════════════════════════════════════════
 // SCORING — съответства точно на Excel формулите
@@ -579,6 +587,16 @@ function buildCheckUI() {
         </div>
       </div>`;
     });
+
+    // Секция за снимки
+    html += `<div class="criteria-card" style="background:#F0F4FF;border-top:2px dashed #3B5BDB30;padding:10px 14px">
+      <div style="font-size:11px;font-weight:700;color:#3B5BDB;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">📷 Снимки (при забележка)</div>
+      <div id="photos_${sector.id}" class="photo-preview" style="display:flex;flex-wrap:wrap;gap:6px;min-height:0"></div>
+      <label style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:6px 14px;background:#3B5BDB;color:#fff;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600">
+        + Добави снимка
+        <input type="file" accept="image/*" multiple style="display:none" onchange="handlePhotoUpload(event,'${sector.id}')">
+      </label>
+    </div>`;
 
     // Резултат за сектора
     html += `<div class="criteria-card result-row" id="result_${sector.id}">
@@ -965,7 +983,7 @@ function saveCheck() {
     shop, date, manager, savedAt: entry.ts,
     avgPct: pct, bonusOk, blockFail: blockingFail,
     sectorData, state: entry.state,
-    notes: notesArr.join(' | '), repeatIssues: repeatArr.join(', '), deadlines: deadlineArr.join(' | '),
+    notes: notesArr.join(' | ').slice(0, 600), repeatIssues: repeatArr.join(', '), deadlines: deadlineArr.join(' | '),
   };
   // Изпращане на данни чрез Script tag (JSONP) — по-надеждно от Image
   const leanPayload = {
@@ -999,6 +1017,11 @@ function saveCheck() {
     updateEntrySyncStatus('checklist_history', entryId, true);
     renderHistory();
     showSyncNotification('✅ Изпратено успешно в базата!', 'success');
+
+    // Изпращаме снимките към Sheets (асинхронно)
+    if (state.photos && Object.keys(state.photos).length) {
+      sendPhotosToSheets(shop, date, state.photos);
+    }
 
     // Изпращаме имейл САМО след потвърждение, че данните са записани
     if (emailTo && pctVal !== null) {
@@ -1054,6 +1077,7 @@ function saveCheck() {
   alert(`✅ Проверката е запазена!\n${shop} — ${date}\nОбща оценка: ${pctVal!==null?pctVal+'%':'—'}\n${bonusOk?'✅ Бонус одобрен':'✗ Без бонус'}`);
 
   clearDraft();
+  state.photos = {};
   document.getElementById('generalComment').value = '';
   renderHistory();
   showPrevInfo();
@@ -1090,6 +1114,128 @@ let activeShopFilter = 'ALL';
 
 
 // ── Повторно изпращане към Sheets ────────────────────────────────
+
+// ══════════════════════════════════════════════
+// СНИМКИ — Cloudinary интеграция
+// ══════════════════════════════════════════════
+
+async function compressImage(file, maxW=1200, quality=0.78) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let w = img.width, h = img.height;
+        if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        canvas.toBlob(blob => resolve(blob), 'image/jpeg', quality);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadToCloudinary(file, sid, shop, date) {
+  const compressed = await compressImage(file);
+  const fd = new FormData();
+  fd.append('file', compressed, file.name);
+  fd.append('upload_preset', CLOUDINARY_PRESET);
+  fd.append('folder', 'temax/' + (shop||'').replace(/[^a-zA-Z0-9а-яА-Я]/g,'_') + '/' + (date||'').replace(/-/g,''));
+  const resp = await fetch('https://api.cloudinary.com/v1_1/' + CLOUDINARY_CLOUD + '/image/upload', {
+    method: 'POST', body: fd
+  });
+  const data = await resp.json();
+  if (!data.secure_url) throw new Error(data.error && data.error.message || 'Upload failed');
+  return data.secure_url;
+}
+
+async function handlePhotoUpload(event, sid) {
+  const files = Array.from(event.target.files);
+  if (!files.length) return;
+  const shop = (document.getElementById('shop')||{}).value || '';
+  const date = (document.getElementById('checkDate')||{}).value || '';
+  const previewEl = document.getElementById('photos_' + sid);
+  if (!previewEl) return;
+
+  for (const file of files) {
+    // Show uploading thumbnail
+    const thumb = document.createElement('div');
+    thumb.className = 'photo-thumb uploading';
+    thumb.innerHTML = '<div class="thumb-spinner">⏳</div>';
+    previewEl.appendChild(thumb);
+
+    try {
+      const url = await uploadToCloudinary(file, sid, shop, date);
+      // Store URL
+      if (!state.photos) state.photos = {};
+      if (!state.photos[sid]) state.photos[sid] = [];
+      state.photos[sid].push(url);
+      // Update thumbnail
+      thumb.className = 'photo-thumb';
+      thumb.innerHTML = '<img src="' + url + '" style="width:72px;height:72px;object-fit:cover;border-radius:6px;cursor:pointer" onclick="window.open(this.src)">'
+        + '<button onclick="removePhoto(\'' + sid + '\',\'' + url + '\',this.parentNode)" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1">✕</button>';
+      thumb.style.position = 'relative';
+    } catch(err) {
+      thumb.innerHTML = '<div style="color:#C0392B;font-size:10px;padding:4px">❌ ' + err.message.slice(0,30) + '</div>';
+      console.error('Upload error:', err);
+    }
+  }
+  event.target.value = '';
+}
+
+function removePhoto(sid, url, thumbEl) {
+  if (!state.photos || !state.photos[sid]) return;
+  state.photos[sid] = state.photos[sid].filter(u => u !== url);
+  if (thumbEl) thumbEl.remove();
+}
+
+function sendPhotosToSheets(shop, date, photos) {
+  if (!photos || !Object.keys(photos).length) return;
+  // Filter out empty sectors
+  const filtered = {};
+  Object.keys(photos).forEach(sid => {
+    if (photos[sid] && photos[sid].length) filtered[sid] = photos[sid];
+  });
+  if (!Object.keys(filtered).length) return;
+
+  const cbName = '_photos_' + Date.now();
+  window[cbName] = function(r) {
+    delete window[cbName];
+    if (r && r.status === 'ok') {
+      console.log('[ТеМАХ] Снимките са записани в Sheets');
+    } else {
+      console.warn('[ТеМАХ] Грешка при запис на снимки:', r && r.message);
+    }
+  };
+  const sc = document.createElement('script');
+  sc.src = SHEETS_URL
+    + '?action=addPhotos'
+    + '&shop=' + encodeURIComponent(shop)
+    + '&date=' + encodeURIComponent(date)
+    + '&photos=' + encodeURIComponent(JSON.stringify(filtered))
+    + '&callback=' + cbName;
+  sc.onerror = () => console.warn('[ТеМАХ] Грешка при изпращане на снимки');
+  document.head.appendChild(sc);
+}
+
+// Render photo previews for a sector (called on restore draft)
+function renderPhotoPreview(sid) {
+  const previewEl = document.getElementById('photos_' + sid);
+  if (!previewEl || !state.photos || !state.photos[sid]) return;
+  previewEl.innerHTML = '';
+  state.photos[sid].forEach(url => {
+    const thumb = document.createElement('div');
+    thumb.className = 'photo-thumb';
+    thumb.style.position = 'relative';
+    thumb.innerHTML = '<img src="' + url + '" style="width:72px;height:72px;object-fit:cover;border-radius:6px;cursor:pointer" onclick="window.open(this.src)">'
+      + '<button onclick="removePhoto(\'' + sid + '\',\'' + url + '\',this.parentNode)" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1">✕</button>';
+    previewEl.appendChild(thumb);
+  });
+}
+
 function resendToSheets(entryTs) {
   try {
     const history = loadHistory();
@@ -1406,7 +1552,22 @@ function generatePDF() {
 </tr></thead><tbody>${sectorRows}</tbody></table>
 ${notesHtml?`<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;margin-bottom:5px">Забележки</div><div style="border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px;margin-bottom:14px">${notesHtml}</div>`:''}
 <div style="margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:10px;color:#94A3B8;display:flex;justify-content:space-between">
-  ${state.generalComment ? `<div style='margin:0 0 14px'><div style='font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:6px'>Допълнителни бележки</div><div style='padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;color:#374151;white-space:pre-wrap'>${state.generalComment}</div></div>` : ''}<span>ТеМАХ · Контролна карта · ${new Date().toLocaleDateString('bg-BG')}</span><span>Генерирано: ${new Date().toLocaleString('bg-BG')}</span>
+  ${(function(){
+      const p = state.photos || {};
+      const secs = Object.keys(p).filter(sid => p[sid] && p[sid].length);
+      if (!secs.length) return '';
+      let ph = '<div style="margin:0 0 14px;page-break-inside:avoid">';
+      ph += '<div style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px">Снимки по сектори</div>';
+      secs.forEach(sid => {
+        const s = SECTORS.find(x=>x.id===sid);
+        ph += '<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">' + (s?s.name:sid) + '</div>';
+        ph += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+        p[sid].forEach(url => { ph += '<img src="'+url+'" style="width:150px;height:110px;object-fit:cover;border-radius:4px;border:1px solid #E2E8F0" crossorigin="anonymous">'; });
+        ph += '</div></div>';
+      });
+      ph += '</div>';
+      return ph;
+    })()}${state.generalComment ? `<div style='margin:0 0 14px'><div style='font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:6px'>Допълнителни бележки</div><div style='padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;color:#374151;white-space:pre-wrap'>${state.generalComment}</div></div>` : ''}<span>ТеМАХ · Контролна карта · ${new Date().toLocaleDateString('bg-BG')}</span><span>Генерирано: ${new Date().toLocaleString('bg-BG')}</span>
 </div>
 <div style="margin-top:16px;text-align:center;display:flex;gap:10px;justify-content:center">
   <button onclick="window.print()" style="padding:10px 24px;background:#0D1B2A;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">🖨️ Печат / Запази PDF</button>
@@ -1415,7 +1576,17 @@ ${notesHtml?`<div style="font-size:10px;font-weight:700;color:#64748B;text-trans
 <p style="text-align:center;font-size:11px;color:#94A3B8;margin-top:8px">За да запазите като PDF: Печат → Принтер: "Запази като PDF"</p>
 <script>
   // Изчакваме малко преди print за да заредят стиловете
-  setTimeout(function(){window.print()}, 800);
+  (function(){
+  var imgs = document.getElementsByTagName('img');
+  if (!imgs.length) { setTimeout(function(){window.print();}, 500); return; }
+  var loaded = 0, total = imgs.length;
+  var doPrint = function(){ if(++loaded >= total) setTimeout(function(){window.print();}, 300); };
+  for(var i=0; i<imgs.length; i++){
+    if(imgs[i].complete) doPrint();
+    else { imgs[i].onload = doPrint; imgs[i].onerror = doPrint; }
+  }
+  setTimeout(function(){window.print();}, 4000); // fallback
+})();
 <\/script></body></html>`);
   pw.document.close();
 }
