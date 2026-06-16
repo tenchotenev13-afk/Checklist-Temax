@@ -592,10 +592,16 @@ function buildCheckUI() {
     html += `<div class="criteria-card" style="background:#F0F4FF;border-top:2px dashed #3B5BDB30;padding:10px 14px">
       <div style="font-size:11px;font-weight:700;color:#3B5BDB;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">📷 Снимки (при забележка)</div>
       <div id="photos_${sector.id}" class="photo-preview" style="display:flex;flex-wrap:wrap;gap:6px;min-height:0"></div>
-      <label style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:6px 14px;background:#3B5BDB;color:#fff;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600">
-        + Добави снимка
-        <input type="file" accept="image/*" multiple style="display:none" onchange="handlePhotoUpload(event,'${sector.id}')">
-      </label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <label style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#3B5BDB;color:#fff;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600">
+          📷 Камера
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="handlePhotoUpload(event,'${sector.id}')">
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#5C7CFA;color:#fff;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600">
+          🖼️ Галерия
+          <input type="file" accept="image/*" multiple style="display:none" onchange="handlePhotoUpload(event,'${sector.id}')">
+        </label>
+      </div>
     </div>`;
 
     // Резултат за сектора
