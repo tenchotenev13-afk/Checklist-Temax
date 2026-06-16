@@ -1024,9 +1024,9 @@ function saveCheck() {
     renderHistory();
     showSyncNotification('✅ Изпратено успешно в базата!', 'success');
 
-    // Изпращаме снимките към Sheets (асинхронно)
-    if (state.photos && Object.keys(state.photos).length) {
-      sendPhotosToSheets(shop, date, state.photos);
+    // Изпращаме снимките към Sheets (POST за неограничен размер)
+    if (photosToSend && Object.keys(photosToSend).length) {
+      sendPhotosToSheets(shop, date, photosToSend);
     }
 
     // Изпращаме имейл САМО след потвърждение, че данните са записани
@@ -1053,6 +1053,9 @@ function saveCheck() {
       }, 4000); // 4 секунди — за да се запишат данните в Sheets преди lookup
     }
   };
+
+  // Запазваме копие на снимките ПРЕДИ да се изчистят от state
+  const photosToSend = JSON.parse(JSON.stringify(state.photos || {}));
 
   // Таймаут — ако след 15 сек. няма потвърждение, предупреждаваме
   const saveTimeout = setTimeout(function() {
@@ -1200,31 +1203,43 @@ function removePhoto(sid, url, thumbEl) {
 
 function sendPhotosToSheets(shop, date, photos) {
   if (!photos || !Object.keys(photos).length) return;
-  // Filter out empty sectors
   const filtered = {};
   Object.keys(photos).forEach(sid => {
     if (photos[sid] && photos[sid].length) filtered[sid] = photos[sid];
   });
   if (!Object.keys(filtered).length) return;
 
-  const cbName = '_photos_' + Date.now();
-  window[cbName] = function(r) {
-    delete window[cbName];
-    if (r && r.status === 'ok') {
-      console.log('[ТеМАХ] Снимките са записани в Sheets');
-    } else {
-      console.warn('[ТеМАХ] Грешка при запис на снимки:', r && r.message);
+  // POST с no-cors — няма URL лимит, работи дори без CORS headers
+  const payload = JSON.stringify({
+    action: 'addPhotos',
+    shop: shop,
+    date: date,
+    photos: filtered
+  });
+
+  fetch(SHEETS_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain' },
+    body: payload
+  }).then(() => {
+    console.log('[ТеМАХ] Снимките са изпратени към Sheets');
+  }).catch(err => {
+    console.warn('[ТеМАХ] Грешка при изпращане на снимки:', err);
+    // Fallback: JSONP за малко количество снимки
+    const total = Object.values(filtered).reduce((a, arr) => a + arr.length, 0);
+    if (total <= 10) {
+      const cb = '_ph_' + Date.now();
+      window[cb] = function(r) { delete window[cb]; };
+      const sc = document.createElement('script');
+      sc.src = SHEETS_URL + '?action=addPhotos'
+        + '&shop=' + encodeURIComponent(shop)
+        + '&date=' + encodeURIComponent(date)
+        + '&photos=' + encodeURIComponent(JSON.stringify(filtered))
+        + '&callback=' + cb;
+      document.head.appendChild(sc);
     }
-  };
-  const sc = document.createElement('script');
-  sc.src = SHEETS_URL
-    + '?action=addPhotos'
-    + '&shop=' + encodeURIComponent(shop)
-    + '&date=' + encodeURIComponent(date)
-    + '&photos=' + encodeURIComponent(JSON.stringify(filtered))
-    + '&callback=' + cbName;
-  sc.onerror = () => console.warn('[ТеМАХ] Грешка при изпращане на снимки');
-  document.head.appendChild(sc);
+  });
 }
 
 // Render photo previews for a sector (called on restore draft)
@@ -1573,7 +1588,8 @@ ${notesHtml?`<div style="font-size:10px;font-weight:700;color:#64748B;text-trans
       });
       ph += '</div>';
       return ph;
-    })()}${state.generalComment ? `<div style='margin:0 0 14px'><div style='font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:6px'>Допълнителни бележки</div><div style='padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;color:#374151;white-space:pre-wrap'>${state.generalComment}</div></div>` : ''}<span>ТеМАХ · Контролна карта · ${new Date().toLocaleDateString('bg-BG')}</span><span>Генерирано: ${new Date().toLocaleString('bg-BG')}</span>
+    })()}${state.generalComment ? `<div style='margin:0 0 14px'><div style='font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:6px'>Допълнителни бележки</div><div style='padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;color:#374151;white-space:pre-wrap'>${state.generalComment}</div></div>` : ''}<span>ТеМАХ · Контролна карта · ${new Date().toLocaleDateString('bg-BG')}</span>
+  <span style="font-size:10px;color:#94A3B8">💡 За запазване: Печат → Дестинация → Запази като PDF</span></span><span>Генерирано: ${new Date().toLocaleString('bg-BG')}</span>
 </div>
 <div style="margin-top:16px;text-align:center;display:flex;gap:10px;justify-content:center">
   <button onclick="window.print()" style="padding:10px 24px;background:#0D1B2A;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">🖨️ Печат / Запази PDF</button>

@@ -338,9 +338,39 @@ function sendJSON(obj, cb) {
 // ── POST handler (от чеклиста — fetch POST) ─────────────────────
 function doPost(e) {
   try {
-    var data = JSON.parse(e.postData.contents);
-    writeRow(data);
-    var output = ContentService.createTextOutput(JSON.stringify({status:'ok'}));
+    var body = JSON.parse(e.postData.contents);
+    var output;
+
+    // addPhotos via POST
+    if (body.action === 'addPhotos') {
+      var shopP   = body.shop  || '';
+      var dateP   = body.date  || '';
+      var photosJ = JSON.stringify(body.photos || {});
+      var ss3     = SpreadsheetApp.openById(SS_ID);
+      var sheet3  = ss3.getSheetByName(SS_RAW);
+      if (sheet3 && sheet3.getLastRow() > 1) {
+        var rows3 = sheet3.getRange(2, 1, sheet3.getLastRow()-1, 3).getValues();
+        for (var ri = rows3.length - 1; ri >= 0; ri--) {
+          var rd = rows3[ri][2];
+          if (rd instanceof Date) rd = Utilities.formatDate(rd, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+          else rd = String(rd).slice(0,10);
+          if (String(rows3[ri][1]).trim() === shopP.trim() && rd === dateP) {
+            if (sheet3.getMaxColumns() < 66) sheet3.insertColumnsAfter(sheet3.getMaxColumns(), 66 - sheet3.getMaxColumns());
+            sheet3.getRange(ri + 2, 66).setValue(photosJ);
+            output = ContentService.createTextOutput(JSON.stringify({status:'ok'}));
+            output.setMimeType(ContentService.MimeType.JSON);
+            return output;
+          }
+        }
+      }
+      output = ContentService.createTextOutput(JSON.stringify({status:'error', message:'Записът не е намерен'}));
+      output.setMimeType(ContentService.MimeType.JSON);
+      return output;
+    }
+
+    // Default: save checklist data
+    writeRow(body);
+    output = ContentService.createTextOutput(JSON.stringify({status:'ok'}));
     output.setMimeType(ContentService.MimeType.JSON);
     return output;
   } catch(err) {
