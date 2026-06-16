@@ -37,26 +37,8 @@ function doGet(e) {
       return sendJSON(getAllRows(), cb);
     }
 
-    // Чеклистът изпраща нова проверка
-    if (data) {
-      // Apps Script вече декодира URL параметрите — не декодираме втори път!
-      try {
-        var parsed = JSON.parse(data);
-        if (!parsed.shop || !parsed.date) {
-          return sendJSON({status:'error', message:'Липсват задължителни полета (shop/date)'}, cb);
-        }
-        writeRow(parsed);
-        return sendJSON({status:'ok', message:'Записано успешно'}, cb);
-      } catch(parseErr) {
-        // Логваме грешката в отделен лист за диагностика
-        try {
-          var ss = SpreadsheetApp.openById(SS_ID);
-          var errSheet = ss.getSheetByName('_errors_') || ss.insertSheet('_errors_');
-          errSheet.appendRow([new Date(), 'parse error', parseErr.toString(), String(data).slice(0,200)]);
-        } catch(e) {}
-        return sendJSON({status:'error', message:'JSON parse грешка: ' + parseErr.toString()}, cb);
-      }
-    }
+    // ВАЖНО: Проверяваме action преди data за да избегнем двойни редове
+    // (data проверката е последна — вижте края на doGet)
 
     // Тест на записването — ?action=testWrite
     if (action === 'testWrite') {
@@ -122,7 +104,9 @@ function doGet(e) {
             } else {
               rowDate = String(rowDate).slice(0, 10);
             }
-            if (String(rowsE[ri][1]).trim() === shop.trim() && rowDate === date) {
+            // Само редове С данни (не празни редове от грешка)
+            var rowHasPct = rowsE[ri][4] !== '' && rowsE[ri][4] !== null && rowsE[ri][4] !== undefined;
+            if (String(rowsE[ri][1]).trim() === shop.trim() && rowDate === date && rowHasPct) {
               entry = rowsE[ri]; break;
             }
           }
@@ -307,11 +291,14 @@ function doGet(e) {
         var sheet3  = ss3.getSheetByName(SS_RAW);
         if (sheet3 && sheet3.getLastRow() > 1) {
           var rows3 = sheet3.getRange(2, 1, sheet3.getLastRow()-1, 3).getValues();
-          for (var ri3 = rows3.length - 1; ri3 >= 0; ri3--) {
-            var rd3 = rows3[ri3][2];
+          var rowsWithData = sheet3.getRange(2, 1, sheet3.getLastRow()-1, Math.min(sheet3.getLastColumn(),5)).getValues();
+          for (var ri3 = rowsWithData.length - 1; ri3 >= 0; ri3--) {
+            var rd3 = rowsWithData[ri3][2];
             if (rd3 instanceof Date) rd3 = Utilities.formatDate(rd3, Session.getScriptTimeZone(), 'yyyy-MM-dd');
             else rd3 = String(rd3).slice(0,10);
-            if (String(rows3[ri3][1]).trim() === shopP.trim() && rd3 === dateP) {
+            // Само редове С данни (avgPct не е празно) — пропускаме празните редове
+            var hasPct = rowsWithData[ri3][4] !== '' && rowsWithData[ri3][4] !== null && rowsWithData[ri3][4] !== undefined;
+            if (String(rowsWithData[ri3][1]).trim() === shopP.trim() && rd3 === dateP && hasPct) {
               if (sheet3.getMaxColumns() < 66) sheet3.insertColumnsAfter(sheet3.getMaxColumns(), 66 - sheet3.getMaxColumns());
               // Merge с вече записани снимки (изпращаме по 1 сектор)
               var cell = sheet3.getRange(ri3 + 2, 66);
@@ -329,6 +316,33 @@ function doGet(e) {
         return sendJSON({status:'error', message:'Записът не е намерен'}, cb);
       } catch(err) {
         return sendJSON({status:'error', message:'Грешка: ' + err.toString()}, cb);
+      }
+    }
+
+
+    // Чеклистът изпраща нова проверка (СЛЕД всички action проверки!)
+    if (data) {
+      try {
+        var parsed = JSON.parse(data);
+        if (!parsed.shop || !parsed.date) {
+          return sendJSON({status:'error', message:'Липсват задължителни полета (shop/date)'}, cb);
+        }
+        // Изискваме данни за поне 1 сектор — защита срещу празни редове
+        var hasData = parsed.sectorData && Object.keys(parsed.sectorData).length > 0;
+        if (!hasData) {
+          Logger.log('writeRow blocked: no sector data for ' + parsed.shop);
+          return sendJSON({status:'error', message:'Липсват данни за сектори'}, cb);
+        }
+        Logger.log('writeRow called for: ' + parsed.shop + ' ' + parsed.date);
+        writeRow(parsed);
+        return sendJSON({status:'ok', message:'Записано успешно'}, cb);
+      } catch(parseErr) {
+        try {
+          var ss = SpreadsheetApp.openById(SS_ID);
+          var errSheet = ss.getSheetByName('_errors_') || ss.insertSheet('_errors_');
+          errSheet.appendRow([new Date(), 'parse error', parseErr.toString(), String(data).slice(0,200)]);
+        } catch(ex) {}
+        return sendJSON({status:'error', message:'JSON parse грешка: ' + parseErr.toString()}, cb);
       }
     }
 
