@@ -291,6 +291,22 @@ function printDashboardEntry(idx) {
     + '<th style="padding:7px 10px;font-size:10px;color:#94A3B8;text-align:center;text-transform:uppercase">Обща %</th>'
     + '<th style="padding:7px 10px;font-size:10px;color:#94A3B8;text-align:left;text-transform:uppercase">Статус</th>'
     + '</tr></thead><tbody>' + sectorRows + '</tbody></table>'
+    + (function(){
+        if (!d.photos || !Object.keys(d.photos).length) return '';
+        var sids = Object.keys(d.photos).filter(function(sid){ return d.photos[sid] && d.photos[sid].length; });
+        if (!sids.length) return '';
+        var ph = '<div style="font-size:11px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.04em;margin:14px 0 8px">📷 Снимки по сектори</div>';
+        sids.forEach(function(sid){
+          var name = SEC_NAMES[sid] || sid;
+          ph += '<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">' + name + '</div>';
+          ph += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+          d.photos[sid].forEach(function(url){
+            ph += '<img src="' + url + '" style="width:140px;height:105px;object-fit:cover;border-radius:4px;border:1px solid #E2E8F0">';
+          });
+          ph += '</div></div>';
+        });
+        return ph;
+      })()
     + notesHtml
     + '<div style="margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:10px;color:#94A3B8;display:flex;justify-content:space-between">'
     + '<span>ТеМАХ · Контролна карта · Табло на директора</span>'
@@ -299,7 +315,7 @@ function printDashboardEntry(idx) {
     + '<button onclick="window.print()" style="padding:10px 24px;background:#0D1B2A;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">🖨️ Печат / Запази PDF</button>'
     + '<button onclick="window.close()" style="padding:10px 24px;background:#E2E8F0;color:#374151;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">✕ Затвори</button>'
     + '</div>'
-    + '<script>setTimeout(function(){window.print()},800)<\/script></body></html>');
+    + '<script>(function(){var imgs=document.getElementsByTagName("img");if(!imgs.length){setTimeout(function(){window.print()},500);return;}var loaded=0,total=imgs.length;var doPrint=function(){if(++loaded>=total)setTimeout(function(){window.print()},300);};for(var i=0;i<imgs.length;i++){if(imgs[i].complete)doPrint();else{imgs[i].onload=doPrint;imgs[i].onerror=doPrint;}}setTimeout(function(){window.print()},4000);})()<\/script></body></html>');
   pw.document.close();
 }
 
@@ -514,12 +530,48 @@ function renderTable(){
         if(!d.photos||!Object.keys(d.photos).length) return '—';
         const sids=Object.keys(d.photos).filter(sid=>d.photos[sid]&&d.photos[sid].length);
         if(!sids.length) return '—';
-        return sids.map(sid=>'<a href="'+d.photos[sid][0]+'" target="_blank" style="color:#3B5BDB;text-decoration:none">📷'+sid.replace('s','')+'('+d.photos[sid].length+')</a>').join(' ');
+        return sids.map(sid=>{
+          const urls = d.photos[sid].join('|||');
+          return '<a href="javascript:void(0)" onclick="showPhotoGallery(\''+urls.replace(/'/g,"\\'")+'\',\''+sid+'\')" style="color:#3B5BDB;text-decoration:none;cursor:pointer">📷'+sid.replace('s','')+'('+d.photos[sid].length+')</a>';
+        }).join(' ');
       })()+' </td>'+
       '</tr>';
   });
   h+='</tbody></table></div>';
   document.getElementById('tabContent').innerHTML=h;
+}
+
+
+function showPhotoGallery(urlsStr, sid){
+  const urls = urlsStr.split('|||');
+  const secName = (typeof SEC_NAMES !== 'undefined' && SEC_NAMES[sid]) ? SEC_NAMES[sid] : sid;
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:20px;box-sizing:border-box';
+  overlay.onclick = function(e){ if(e.target===overlay) document.body.removeChild(overlay); };
+
+  const title = document.createElement('div');
+  title.style.cssText = 'color:#fff;font-size:14px;font-weight:700;margin-bottom:16px';
+  title.textContent = secName + ' — ' + urls.length + ' снимки';
+  overlay.appendChild(title);
+
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;max-width:90vw;max-height:75vh;overflow:auto;justify-content:center';
+  urls.forEach(function(u){
+    const img = document.createElement('img');
+    img.src = u;
+    img.style.cssText = 'max-width:280px;max-height:280px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid #fff';
+    img.onclick = function(e){ e.stopPropagation(); window.open(u, '_blank'); };
+    grid.appendChild(img);
+  });
+  overlay.appendChild(grid);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕ Затвори';
+  closeBtn.style.cssText = 'margin-top:16px;padding:8px 20px;background:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer';
+  closeBtn.onclick = function(){ document.body.removeChild(overlay); };
+  overlay.appendChild(closeBtn);
+
+  document.body.appendChild(overlay);
 }
 
 function thSort(col,label){
