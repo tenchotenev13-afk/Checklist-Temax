@@ -932,19 +932,7 @@ function startNewCheck() {
   if (document.getElementById('reportEmail')) document.getElementById('reportEmail').value = '';
   if (document.getElementById('generalComment')) document.getElementById('generalComment').value = '';
 
-  const banner = document.getElementById('lockedBanner');
-  const btnSave = document.getElementById('btnSave');
-  if (banner) banner.style.display = 'none';
-  if (btnSave) { btnSave.disabled = false; btnSave.style.opacity = '1'; btnSave.style.cursor = 'pointer'; }
-  document.querySelectorAll('#checkContent input, #checkContent textarea, #checkContent button.score-btn, #checkContent label input[type=file]')
-    .forEach(el => { el.disabled = false; });
-  ['shopName','checkDate','managerName','reportEmail'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.disabled = false;
-  });
-  if (document.getElementById('generalComment')) document.getElementById('generalComment').disabled = false;
-
-  localStorage.removeItem('temax_locked');
+  unlockCheckForm();
   clearDraft();
   startAutosave();
 }
@@ -1182,13 +1170,36 @@ function loadHistory() {
 
 function clearCheck() {
   if (!confirm('Изчистване на всички данни?')) return;
-  state = { blocking:{}, general:{}, specific:{}, notes:{}, repeat:{}, deadline:{} };
+  state = { blocking:{}, general:{}, specific:{}, notes:{}, repeat:{}, deadline:{}, photos:{} };
   buildCheckUI();
   document.getElementById('shopName').value = '';
   document.getElementById('checkDate').value = new Date().toISOString().slice(0,10);
+  document.getElementById('managerName').value = '';
+  if (document.getElementById('reportEmail')) document.getElementById('reportEmail').value = '';
+  if (document.getElementById('generalComment')) document.getElementById('generalComment').value = '';
+
+  // ВАЖНО: ако формата беше заключена (след предишен запис), отключваме я
+  unlockCheckForm();
+
+  clearDraft();
   checkDraft();
   startAutosave();
-  document.getElementById('managerName').value = '';
+}
+
+// ── Отключване — общо за clearCheck() и startNewCheck() ─────────
+function unlockCheckForm() {
+  const banner = document.getElementById('lockedBanner');
+  const btnSave = document.getElementById('btnSave');
+  if (banner) banner.style.display = 'none';
+  if (btnSave) { btnSave.disabled = false; btnSave.style.opacity = '1'; btnSave.style.cursor = 'pointer'; }
+  document.querySelectorAll('#checkContent input, #checkContent textarea, #checkContent button.score-btn, #checkContent label input[type=file]')
+    .forEach(el => { el.disabled = false; });
+  ['shopName','checkDate','managerName','reportEmail'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = false;
+  });
+  if (document.getElementById('generalComment')) document.getElementById('generalComment').disabled = false;
+  localStorage.removeItem('temax_locked');
 }
 
 function showPrevInfo() {
