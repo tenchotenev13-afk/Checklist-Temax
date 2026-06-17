@@ -469,7 +469,11 @@ function renderOverview(){
   const shops=[...new Set(filtered.map(d=>d.shop))].length;
 
   const shopMap={};
-  filtered.forEach(d=>{if(!shopMap[d.shop]||d.date>shopMap[d.shop].date) shopMap[d.shop]=d;});
+  filtered.forEach(d=>{
+    // Сравняваме по пълен savedAt timestamp (не само дата), за коректност при няколко проверки в един ден
+    const cur = shopMap[d.shop];
+    if (!cur || String(d.savedAt||d.date||'') > String(cur.savedAt||cur.date||'')) shopMap[d.shop]=d;
+  });
   const ranked=Object.values(shopMap).sort((a,b)=>(b.overallPct||0)-(a.overallPct||0));
 
   const ok_class=avgPct===null?'info':avgPct>=85?'ok':avgPct>=60?'warn':'bad';
@@ -682,7 +686,11 @@ function setSort(col){if(sortCol===col)sortDir*=-1;else{sortCol=col;sortDir=-1;}
 function renderHeatmap(){
   if(!filtered.length){document.getElementById('tabContent').innerHTML='<p class="empty">Няма данни.</p>';return;}
   const shopMap={};
-  filtered.forEach(d=>{if(!shopMap[d.shop]||d.date>shopMap[d.shop].date) shopMap[d.shop]=d;});
+  filtered.forEach(d=>{
+    // Сравняваме по пълен savedAt timestamp (не само дата), за коректност при няколко проверки в един ден
+    const cur = shopMap[d.shop];
+    if (!cur || String(d.savedAt||d.date||'') > String(cur.savedAt||cur.date||'')) shopMap[d.shop]=d;
+  });
   const shops=Object.values(shopMap).sort((a,b)=>(a.shop||'').localeCompare(b.shop||''));
 
   let h='<div class="heatmap-wrap"><table class="heatmap-table"><thead><tr><th>Магазин</th>';
