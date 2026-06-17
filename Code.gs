@@ -287,6 +287,7 @@ function doGet(e) {
         var dateP   = e.parameter.date || '';
         var photosJ = e.parameter.photos || '{}';
         var newPhotos = JSON.parse(photosJ);
+        Logger.log('addPhotos: shop=' + shopP + ' date=' + dateP + ' sectors=' + Object.keys(newPhotos).join(','));
         var ss3     = SpreadsheetApp.openById(SS_ID);
         var sheet3  = ss3.getSheetByName(SS_RAW);
         if (sheet3 && sheet3.getLastRow() > 1) {
@@ -313,8 +314,10 @@ function doGet(e) {
             }
           }
         }
-        return sendJSON({status:'error', message:'Записът не е намерен'}, cb);
+        Logger.log('addPhotos: ЗАПИСЪТ НЕ Е НАМЕРЕН за shop=' + shopP + ' date=' + dateP);
+        return sendJSON({status:'error', message:'Записът не е намерен (shop=' + shopP + ', date=' + dateP + ')'}, cb);
       } catch(err) {
+        Logger.log('addPhotos ГРЕШКА: ' + err.toString());
         return sendJSON({status:'error', message:'Грешка: ' + err.toString()}, cb);
       }
     }

@@ -903,9 +903,11 @@ function checkDraft() {
 
 // ── Заключване на проверката след успешен запис ─────────────────
 function lockCheckForm() {
+  console.log('[ТеМАХ] lockCheckForm() извикана');
   const banner = document.getElementById('lockedBanner');
   const saveBar = document.getElementById('saveBar');
   const btnSave = document.getElementById('btnSave');
+  console.log('[ТеМАХ] banner намерен:', !!banner, 'btnSave намерен:', !!btnSave);
   if (banner) banner.style.display = 'block';
   if (btnSave) { btnSave.disabled = true; btnSave.style.opacity = '0.4'; btnSave.style.cursor = 'not-allowed'; }
   // Блокираме всички полета за редакция (само visual + functional disable)
@@ -944,13 +946,7 @@ function startNewCheck() {
 
   localStorage.removeItem('temax_locked');
   clearDraft();
-  // Ако предишна проверка е заключена (страницата е презаредена), оставаме заключени
-  if (localStorage.getItem('temax_locked') === '1') {
-    setTimeout(lockCheckForm, 100); // изчакваме DOM да се изгради
-  } else {
-    checkDraft();
-    startAutosave();
-  }
+  startAutosave();
 }
 
 function showSyncNotification(msg, type) {
@@ -1164,12 +1160,18 @@ function saveCheck() {
   };
   document.head.appendChild(saveScript);
 
+  // Заключваме ВЕДНАГА — преди alert(), за моментална визуална реакция
+  try {
+    lockCheckForm();
+  } catch(lockErr) {
+    console.error('[ТеМАХ] lockCheckForm грешка:', lockErr);
+  }
+
   alert(`✅ Проверката е запазена!\n${shop} — ${date}\nОбща оценка: ${pctVal!==null?pctVal+'%':'—'}\n${bonusOk?'✅ Бонус одобрен':'✗ Без бонус'}`);
 
   clearDraft();
   state.photos = {};
   document.getElementById('generalComment').value = '';
-  lockCheckForm(); // Заключваме веднага — независимо от резултата на JSONP по-късно
   renderHistory();
   showPrevInfo();
 }
@@ -1819,6 +1821,14 @@ document.getElementById('checkDate').value = new Date().toISOString().slice(0,10
 buildCheckUI();
 showPrevInfo();
 renderHistory();
+
+// Ако предишна проверка е заключена (страницата презаредена след запис), пазим заключването
+if (localStorage.getItem('temax_locked') === '1') {
+  lockCheckForm();
+} else {
+  checkDraft();
+  startAutosave();
+}
 </script>
 </body>
 </html>
