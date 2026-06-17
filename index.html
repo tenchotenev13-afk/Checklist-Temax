@@ -199,8 +199,13 @@ body{font-family:'IBM Plex Sans',sans-serif;background:#F1F3F5;color:var(--text)
     <label style="font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:8px">Допълнителни бележки за проверката <span style="font-weight:400;color:#94A3B8">(незадължително)</span></label>
     <textarea id="generalComment" rows="3" placeholder="Общо впечатление, извънредни обстоятелства, положителни наблюдения..." style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;font-family:inherit;color:#374151;background:#fff;resize:vertical;min-height:80px;outline:none" onfocus="this.style.borderColor='#3B5BDB'" onblur="this.style.borderColor='#E2E8F0'"></textarea>
   </div>
-<div class="save-bar">
-    <button class="btn-save" onclick="saveCheck()">💾 Запази проверката</button>
+<div id="lockedBanner" style="display:none;margin:0 0 12px;padding:14px 18px;background:#E6F9F1;border:2px solid #0A7C59;border-radius:10px;text-align:center">
+    <div style="font-size:14px;font-weight:700;color:#0A7C59">✅ Тази проверка вече е запазена</div>
+    <div style="font-size:12px;color:#0A7C59;margin-top:4px">За повторно изпращане в базата или по имейл използвайте таб "История"</div>
+    <button onclick="startNewCheck()" style="margin-top:10px;padding:8px 20px;background:#0A7C59;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">+ Нова проверка</button>
+  </div>
+  <div class="save-bar" id="saveBar">
+    <button class="btn-save" id="btnSave" onclick="saveCheck()">💾 Запази проверката</button>
     <button class="btn-clear" onclick="clearCheck()">✕ Изчисти</button>
   </div>
 </div>
@@ -840,13 +845,13 @@ var autosaveInterval = null;
 
 function saveDraft() {
   try {
-    const shop = document.getElementById('shop').value.trim();
+    const shop = document.getElementById('shopName').value.trim();
     if (!shop) return; // Не запазваме без магазин
     const draft = {
       ts: Date.now(),
       shop,
       date: document.getElementById('checkDate').value,
-      manager: document.getElementById('manager').value,
+      manager: document.getElementById('managerName').value,
       email: document.getElementById('reportEmail').value,
       generalComment: (document.getElementById('generalComment') || {}).value || '',
       state: JSON.parse(JSON.stringify(state)),
@@ -877,9 +882,9 @@ function checkDraft() {
     const timeAgo = mins < 1 ? 'преди малко' : `преди ${mins} мин.`;
     const restore = confirm(`Намерена е незапазена проверка за "${draft.shop}" (${timeAgo}).\nИскате ли да я възстановите?`);
     if (restore) {
-      document.getElementById('shop').value = draft.shop || '';
+      document.getElementById('shopName').value = draft.shop || '';
       document.getElementById('checkDate').value = draft.date || '';
-      document.getElementById('manager').value = draft.manager || '';
+      document.getElementById('managerName').value = draft.manager || '';
       document.getElementById('reportEmail').value = draft.email || '';
       if (document.getElementById('generalComment')) {
         document.getElementById('generalComment').value = draft.generalComment || '';
@@ -893,6 +898,59 @@ function checkDraft() {
       clearDraft();
     }
   } catch(e) {}
+}
+
+
+// ── Заключване на проверката след успешен запис ─────────────────
+function lockCheckForm() {
+  const banner = document.getElementById('lockedBanner');
+  const saveBar = document.getElementById('saveBar');
+  const btnSave = document.getElementById('btnSave');
+  if (banner) banner.style.display = 'block';
+  if (btnSave) { btnSave.disabled = true; btnSave.style.opacity = '0.4'; btnSave.style.cursor = 'not-allowed'; }
+  // Блокираме всички полета за редакция (само visual + functional disable)
+  document.querySelectorAll('#checkContent input, #checkContent textarea, #checkContent button.score-btn, #checkContent label input[type=file]')
+    .forEach(el => { el.disabled = true; });
+  // Заключваме и горните полета (магазин, дата, управител, имейл)
+  ['shopName','checkDate','managerName','reportEmail'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = true;
+  });
+  if (document.getElementById('generalComment')) document.getElementById('generalComment').disabled = true;
+  localStorage.setItem('temax_locked', '1');
+}
+
+function startNewCheck() {
+  if (!confirm('Започване на нова проверка? Текущите данни ще се изчистят.')) return;
+  state = { blocking:{}, general:{}, specific:{}, notes:{}, repeat:{}, deadline:{}, photos:{} };
+  buildCheckUI();
+  document.getElementById('shopName').value = '';
+  document.getElementById('checkDate').value = new Date().toISOString().slice(0,10);
+  document.getElementById('managerName').value = '';
+  if (document.getElementById('reportEmail')) document.getElementById('reportEmail').value = '';
+  if (document.getElementById('generalComment')) document.getElementById('generalComment').value = '';
+
+  const banner = document.getElementById('lockedBanner');
+  const btnSave = document.getElementById('btnSave');
+  if (banner) banner.style.display = 'none';
+  if (btnSave) { btnSave.disabled = false; btnSave.style.opacity = '1'; btnSave.style.cursor = 'pointer'; }
+  document.querySelectorAll('#checkContent input, #checkContent textarea, #checkContent button.score-btn, #checkContent label input[type=file]')
+    .forEach(el => { el.disabled = false; });
+  ['shopName','checkDate','managerName','reportEmail'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = false;
+  });
+  if (document.getElementById('generalComment')) document.getElementById('generalComment').disabled = false;
+
+  localStorage.removeItem('temax_locked');
+  clearDraft();
+  // Ако предишна проверка е заключена (страницата е презаредена), оставаме заключени
+  if (localStorage.getItem('temax_locked') === '1') {
+    setTimeout(lockCheckForm, 100); // изчакваме DOM да се изгради
+  } else {
+    checkDraft();
+    startAutosave();
+  }
 }
 
 function showSyncNotification(msg, type) {
@@ -1024,10 +1082,15 @@ function saveCheck() {
     updateEntrySyncStatus('checklist_history', entryId, true);
     renderHistory();
     showSyncNotification('✅ Изпратено успешно в базата!', 'success');
+    lockCheckForm();
 
-    // Изпращаме снимките към Sheets (POST за неограничен размер)
-    if (photosToSend && Object.keys(photosToSend).length) {
+    // Изпращаме снимките към Sheets
+    const photoKeys = Object.keys(photosToSend || {}).filter(s => photosToSend[s] && photosToSend[s].length);
+    console.log('[ТеМАХ] Callback fires. photosToSend sectors:', photoKeys.length);
+    if (photoKeys.length > 0) {
       sendPhotosToSheets(shop, date, photosToSend);
+    } else {
+      console.log('[ТеМАХ] Няма снимки за изпращане');
     }
 
     // Изпращаме имейл САМО след потвърждение, че данните са записани
@@ -1106,6 +1169,7 @@ function saveCheck() {
   clearDraft();
   state.photos = {};
   document.getElementById('generalComment').value = '';
+  lockCheckForm(); // Заключваме веднага — независимо от резултата на JSONP по-късно
   renderHistory();
   showPrevInfo();
 }
@@ -1177,10 +1241,9 @@ async function uploadToCloudinary(file, sid, shop, date) {
   const safeDate = (date || new Date().toISOString().slice(0,10));
   const publicId = 'temax/' + safeShop + '/' + safeDate + '/' + sid + '_' + Date.now();
 
-  fd.append('public_id', publicId);
-  fd.append('folder', 'temax/' + safeShop + '/' + safeDate); // и двете за съвместимост
+  fd.append('public_id', publicId); // съдържа целия път — без отделен folder параметър
 
-  console.log('[ТеМАХ] Cloudinary folder:', 'temax/' + safeShop + '/' + safeDate);
+  console.log('[ТеМАХ] Cloudinary public_id:', publicId);
 
   const resp = await fetch('https://api.cloudinary.com/v1_1/' + CLOUDINARY_CLOUD + '/image/upload', {
     method: 'POST', body: fd
@@ -1194,7 +1257,7 @@ async function uploadToCloudinary(file, sid, shop, date) {
 async function handlePhotoUpload(event, sid) {
   const files = Array.from(event.target.files);
   if (!files.length) return;
-  const shop = (document.getElementById('shop')||{}).value || '';
+  const shop = (document.getElementById('shopName')||{}).value || '';
   const date = (document.getElementById('checkDate')||{}).value || '';
   const previewEl = document.getElementById('photos_' + sid);
   if (!previewEl) return;
@@ -1241,8 +1304,9 @@ function sendPhotosToSheets(shop, date, photos) {
   const sids = Object.keys(filtered);
   if (!sids.length) return;
 
-  console.log('[ТеМАХ] Изпращане на снимки за', sids.length, 'сектора...');
-  showSyncNotification('📷 Снимките се изпращат (' + sids.length + ' сектора)...', 'warning');
+  console.log('[ТеМАХ] sendPhotosToSheets:', sids.length, 'сектора, shop:', shop, 'date:', date);
+  console.log('[ТеМАХ] Photos data:', JSON.stringify(filtered).slice(0,200));
+  showSyncNotification('📷 Изпращане на ' + sids.length + ' сектора снимки...', 'warning');
 
   // Изпращаме по 1 сектор наведнъж (малки URL-ове, надеждно)
   let idx = 0;
@@ -1264,7 +1328,8 @@ function sendPhotosToSheets(shop, date, photos) {
       if (r && r.status === 'ok') {
         console.log('[ТеМАХ] Сектор', sid, '→ Sheets ✅');
       } else {
-        console.warn('[ТеМАХ] Сектор', sid, '→ грешка:', r && r.message);
+        console.warn('[ТеМАХ] Сектор', sid, '→ ГРЕШКА:', r && r.message);
+        showSyncNotification('❌ Снимки грешка (' + sid + '): ' + (r && r.message), 'error');
       }
       setTimeout(sendNextSector, 300); // следващ сектор след 300мс
     };
