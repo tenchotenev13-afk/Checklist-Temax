@@ -1690,7 +1690,18 @@ function generatePDF() {
 
   const pw = window.open('','_blank');
   pw.document.write(`<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8"><title>ТеМАХ — ${shop} — ${date}</title>
-<style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#0F172A}table{width:100%;border-collapse:collapse}@page{margin:15mm;size:A4 portrait}</style></head><body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>
+<style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#0F172A;background:#fff}table{width:100%;border-collapse:collapse}@page{margin:15mm;size:A4 portrait}
+.no-print{margin-bottom:16px;display:flex;gap:10px;justify-content:center}
+.btn-action{padding:10px 22px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}
+@media print{.no-print{display:none}}
+</style></head><body>
+<div class="no-print">
+  <button class="btn-action" style="background:#0D1B2A;color:#fff" onclick="window.print()">🖨️ Печат</button>
+  <button class="btn-action" id="dlBtn" style="background:#3B5BDB;color:#fff" onclick="downloadPdf()">⬇️ Свали PDF</button>
+  <button class="btn-action" style="background:#E2E8F0;color:#374151" onclick="window.close()">✕ Затвори</button>
+</div>
+<div id="pdfContent">
 <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:3px solid #0D1B2A;margin-bottom:16px">
   <div><div style="font-size:22px;font-weight:800;color:#0D1B2A">ТеМАХ — Контролна карта</div>
   <div style="font-size:11px;color:#2F54EB;margin-top:2px">Формула: Сектор = СРЕДНО(Общи%, Специфични%) · Обща = СРЕДНО на 17 сектора</div></div>
@@ -1730,26 +1741,26 @@ ${notesHtml?`<div style="font-size:10px;font-weight:700;color:#64748B;text-trans
       ph += '</div>';
       return ph;
     })()}${state.generalComment ? `<div style='margin:0 0 14px'><div style='font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:6px'>Допълнителни бележки</div><div style='padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;color:#374151;white-space:pre-wrap'>${state.generalComment}</div></div>` : ''}<span>ТеМАХ · Контролна карта · ${new Date().toLocaleDateString('bg-BG')}</span>
-  <span style="font-size:10px;color:#94A3B8">💡 За запазване: Печат → Дестинация → Запази като PDF</span></span><span>Генерирано: ${new Date().toLocaleString('bg-BG')}</span>
+  <span>Генерирано: ${new Date().toLocaleString('bg-BG')}</span>
 </div>
-<div style="margin-top:16px;text-align:center;display:flex;gap:10px;justify-content:center">
-  <button onclick="window.print()" style="padding:10px 24px;background:#0D1B2A;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">🖨️ Печат / Запази PDF</button>
-  <button onclick="window.close()" style="padding:10px 24px;background:#E2E8F0;color:#374151;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">✕ Затвори</button>
 </div>
-<p style="text-align:center;font-size:11px;color:#94A3B8;margin-top:8px">За да запазите като PDF: Печат → Принтер: "Запази като PDF"</p>
 <script>
-  // Изчакваме малко преди print за да заредят стиловете
-  (function(){
-  var imgs = document.getElementsByTagName('img');
-  if (!imgs.length) { setTimeout(function(){window.print();}, 500); return; }
-  var loaded = 0, total = imgs.length;
-  var doPrint = function(){ if(++loaded >= total) setTimeout(function(){window.print();}, 300); };
-  for(var i=0; i<imgs.length; i++){
-    if(imgs[i].complete) doPrint();
-    else { imgs[i].onload = doPrint; imgs[i].onerror = doPrint; }
-  }
-  setTimeout(function(){window.print();}, 4000); // fallback
-})();
+function downloadPdf(){
+  const btn = document.getElementById('dlBtn');
+  btn.textContent = '⏳ Генериране...'; btn.disabled = true;
+  html2pdf().set({
+    margin: 10,
+    filename: 'TeMAX_${shop}_${date}.pdf',
+    image: { type: 'jpeg', quality: 0.92 },
+    html2canvas: { scale: 2, useCORS: true },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+  }).from(document.getElementById('pdfContent')).save().then(function(){
+    btn.textContent = '⬇️ Свали PDF'; btn.disabled = false;
+  }).catch(function(err){
+    btn.textContent = '⬇️ Свали PDF'; btn.disabled = false;
+    alert('Грешка при генериране на PDF: ' + err);
+  });
+}
 <\/script></body></html>`);
   pw.document.close();
 }
@@ -1798,9 +1809,35 @@ function printEntry(idx) {
     }
   }
 
+  // Снимки по сектори от запазената проверка
+  const entryPhotos = entry.photos || (entry.state && entry.state.photos) || {};
+  const photoSecIds = Object.keys(entryPhotos).filter(sid => entryPhotos[sid] && entryPhotos[sid].length);
+  let photosHtml = '';
+  if (photoSecIds.length) {
+    photosHtml += '<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.05em;margin:16px 0 8px">📷 Снимки по сектори</div>';
+    photoSecIds.forEach(sid => {
+      const s = SECTORS.find(x => x.id === sid);
+      photosHtml += `<div style="margin-bottom:10px;page-break-inside:avoid"><div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">${s?s.name:sid}</div><div style="display:flex;flex-wrap:wrap;gap:6px">`;
+      entryPhotos[sid].forEach(url => {
+        photosHtml += `<img src="${url}" style="width:150px;height:110px;object-fit:cover;border-radius:4px;border:1px solid #E2E8F0">`;
+      });
+      photosHtml += '</div></div>';
+    });
+  }
+
   const pw = window.open('','_blank');
   pw.document.write(`<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8"><title>ТеМАХ — ${entry.shop} — ${entry.date}</title>
-<style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#0F172A}table{width:100%;border-collapse:collapse}@page{margin:15mm;size:A4 portrait}</style></head><body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>
+<style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#0F172A;background:#fff}table{width:100%;border-collapse:collapse}@page{margin:15mm;size:A4 portrait}
+.no-print{margin-bottom:16px;display:flex;gap:10px}
+.btn-action{padding:10px 22px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}
+@media print{.no-print{display:none}}
+</style></head><body>
+<div class="no-print">
+  <button class="btn-action" style="background:#0D1B2A;color:#fff" onclick="window.print()">🖨️ Печат</button>
+  <button class="btn-action" id="dlBtn" style="background:#3B5BDB;color:#fff" onclick="downloadPdf()">⬇️ Свали PDF</button>
+</div>
+<div id="pdfContent">
 <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:3px solid #0D1B2A;margin-bottom:16px">
   <div><div style="font-size:22px;font-weight:800">ТеМАХ — Контролна карта</div><div style="font-size:11px;color:#2F54EB">СРЕДНО(Общи%, Специфични%) за сектор · СРЕДНО на 17 сектора за обща</div></div>
   <div style="text-align:right"><div style="font-size:28px;font-weight:800;color:${bonusColor}">${pctVal!==null?pctVal+'%':'—'}</div>
@@ -1822,10 +1859,30 @@ function printEntry(idx) {
 ${entryNotesHtml?`
 <div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.05em;margin:16px 0 5px">Забележки и коментари</div>
 <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;margin-bottom:14px">${entryNotesHtml}</div>`:''}
+${photosHtml}
 <div style="margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:10px;color:#94A3B8;display:flex;justify-content:space-between">
   <span>ТеМАХ · Контролна карта</span><span>Генерирано: ${new Date().toLocaleString('bg-BG')}</span>
 </div>
-<script>window.onload=function(){window.print()}<\/script></body></html>`);
+</div>
+<script>
+function downloadPdf(){
+  const btn = document.getElementById('dlBtn');
+  btn.textContent = '⏳ Генериране...'; btn.disabled = true;
+  html2pdf().set({
+    margin: 10,
+    filename: 'TeMAX_${entry.shop}_${entry.date}.pdf',
+    image: { type: 'jpeg', quality: 0.92 },
+    html2canvas: { scale: 2, useCORS: true },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+  }).from(document.getElementById('pdfContent')).save().then(function(){
+    btn.textContent = '⬇️ Свали PDF'; btn.disabled = false;
+  }).catch(function(err){
+    btn.textContent = '⬇️ Свали PDF'; btn.disabled = false;
+    alert('Грешка при генериране на PDF: ' + err);
+  });
+}
+<\/script>
+</body></html>`);
   pw.document.close();
 }
 

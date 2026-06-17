@@ -215,9 +215,17 @@ let allData=[], filtered=[], activeTab='overview', statusFilter='all', sortCol='
 
 
 // ── PDF ОТЧЕТ ОТ ТАБЛОТО ─────────────────────────────────────────
-function printByShopDate(shop, date) {
+function printByShopDate(shop, date, savedAt) {
   try { shop = decodeURIComponent(shop); } catch(e) {}
-  var d = filtered.find(function(e){ return e.shop === shop && String(e.date).slice(0,10) === String(date).slice(0,10); });
+  var d;
+  // Първо опитваме точно съвпадение по savedAt (уникален timestamp) — за коректност при няколко проверки в същия ден
+  if (savedAt) {
+    d = filtered.find(function(e){ return e.savedAt === savedAt; });
+  }
+  // Fallback: shop+date (може да хване грешен запис при дублирани дати, но е по-добре от нищо)
+  if (!d) {
+    d = filtered.find(function(e){ return e.shop === shop && String(e.date).slice(0,10) === String(date).slice(0,10); });
+  }
   if (!d) { alert('Данните не са намерени.'); return; }
   var idx = filtered.indexOf(d);
   printDashboardEntry(idx);
@@ -271,7 +279,17 @@ function printDashboardEntry(idx) {
 
   var pw = window.open('', '_blank');
   pw.document.write('<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8"><title>ТеМАХ — ' + d.shop + ' — ' + d.date + '</title>'
-    + '<style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#0F172A}table{width:100%;border-collapse:collapse}@page{margin:15mm;size:A4 portrait}</style></head><body>'
+    + '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\\/script>'
+    + '<style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#0F172A;background:#fff}table{width:100%;border-collapse:collapse}@page{margin:15mm;size:A4 portrait}'
+    + '.no-print{margin-bottom:16px;display:flex;gap:10px;justify-content:center}'
+    + '.btn-action{padding:10px 22px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}'
+    + '@media print{.no-print{display:none}}</style></head><body>'
+    + '<div class="no-print">'
+    + '<button class="btn-action" style="background:#0D1B2A;color:#fff" onclick="window.print()">🖨️ Печат</button>'
+    + '<button class="btn-action" id="dlBtn" style="background:#3B5BDB;color:#fff" onclick="downloadPdf()">⬇️ Свали PDF</button>'
+    + '<button class="btn-action" style="background:#E2E8F0;color:#374151" onclick="window.close()">✕ Затвори</button>'
+    + '</div>'
+    + '<div id="pdfContent">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:3px solid #0D1B2A;margin-bottom:16px">'
     + '<div><div style="font-size:22px;font-weight:800;color:#0D1B2A">ТеМАХ — Контролна карта</div>'
     + '<div style="font-size:11px;color:#64748B;margin-top:2px">Табло на директора — PDF отчет</div></div>'
@@ -311,11 +329,15 @@ function printDashboardEntry(idx) {
     + '<div style="margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:10px;color:#94A3B8;display:flex;justify-content:space-between">'
     + '<span>ТеМАХ · Контролна карта · Табло на директора</span>'
     + '<span>Генерирано: ' + new Date().toLocaleString("bg-BG") + '</span></div>'
-    + '<div style="margin-top:12px;text-align:center;display:flex;gap:10px;justify-content:center">'
-    + '<button onclick="window.print()" style="padding:10px 24px;background:#0D1B2A;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">🖨️ Печат / Запази PDF</button>'
-    + '<button onclick="window.close()" style="padding:10px 24px;background:#E2E8F0;color:#374151;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">✕ Затвори</button>'
     + '</div>'
-    + '<script>(function(){var imgs=document.getElementsByTagName("img");if(!imgs.length){setTimeout(function(){window.print()},500);return;}var loaded=0,total=imgs.length;var doPrint=function(){if(++loaded>=total)setTimeout(function(){window.print()},300);};for(var i=0;i<imgs.length;i++){if(imgs[i].complete)doPrint();else{imgs[i].onload=doPrint;imgs[i].onerror=doPrint;}}setTimeout(function(){window.print()},4000);})()<\/script></body></html>');
+    + '<script>'
+    + 'function downloadPdf(){'
+    + 'var btn=document.getElementById("dlBtn");btn.textContent="\u23f3 Генериране...";btn.disabled=true;'
+    + 'html2pdf().set({margin:10,filename:"TeMAX_' + d.shop + '_' + d.date + '.pdf",image:{type:"jpeg",quality:0.92},html2canvas:{scale:2,useCORS:true},jsPDF:{unit:"mm",format:"a4",orientation:"portrait"}})'
+    + '.from(document.getElementById("pdfContent")).save().then(function(){btn.textContent="\u2b07\ufe0f Свали PDF";btn.disabled=false;})'
+    + '.catch(function(err){btn.textContent="\u2b07\ufe0f Свали PDF";btn.disabled=false;alert("Грешка: "+err);});'
+    + '}'
+    + '<\/script></body></html>');
   pw.document.close();
 }
 
@@ -486,7 +508,7 @@ function renderOverview(){
       +'<span style="font-size:10px;color:var(--slate)">'+fmtDate(d.date)+'</span>'
       +'<span class="td-mono" style="min-width:44px;text-align:right;color:'+pctColor(p)+'">'+( p!==null?p+'%':'—')+'</span>'
       +'<span class="td-badge '+(d.bonusOk?'b-ok':'b-no')+'">'+( d.bonusOk?'✅':'✗')+'</span>'
-      +'<button data-shop="'+String(d.shop||'').replace(/"/g,'&quot;')+'" data-date="'+String(d.date||'')+'" onclick="printByShopDate(this.dataset.shop,this.dataset.date)" style="padding:6px 14px;background:var(--indigo);border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">📄 PDF</button>'
+      +'<button data-shop="'+String(d.shop||'').replace(/"/g,'&quot;')+'" data-date="'+String(d.date||'')+'" data-savedat="'+String(d.savedAt||'').replace(/"/g,'&quot;')+'" onclick="printByShopDate(this.dataset.shop,this.dataset.date,this.dataset.savedat)" style="padding:6px 14px;background:var(--indigo);border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">📄 PDF</button>'
       +'</div>';
   });
   h+='</div>';
@@ -610,10 +632,24 @@ function showPhotoGallery(urlsStr, sid){
       prevBtn.style.cssText = 'font-size:32px;color:#fff;background:rgba(255,255,255,.15);border:none;border-radius:50%;width:48px;height:48px;cursor:pointer;flex-shrink:0';
       prevBtn.onclick = function(e){ e.stopPropagation(); currentIndex = (currentIndex - 1 + urls.length) % urls.length; render(); };
 
+      let isZoomed = false;
+      const imgWrap = document.createElement('div');
+      imgWrap.style.cssText = 'overflow:auto;max-width:75vw;max-height:70vh;display:flex;align-items:center;justify-content:center;border-radius:8px';
+
       const img = document.createElement('img');
       img.src = urls[currentIndex];
-      img.style.cssText = 'max-width:75vw;max-height:70vh;object-fit:contain;border-radius:8px';
-      img.onclick = function(e){ e.stopPropagation(); };
+      img.style.cssText = 'max-width:75vw;max-height:70vh;object-fit:contain;border-radius:8px;cursor:zoom-in;transition:transform .2s';
+      img.onclick = function(e){
+        e.stopPropagation();
+        isZoomed = !isZoomed;
+        if (isZoomed) {
+          img.style.cssText = 'max-width:none;max-height:none;width:auto;height:auto;cursor:zoom-out;transform:scale(2);transform-origin:center';
+          imgWrap.style.cursor = 'grab';
+        } else {
+          img.style.cssText = 'max-width:75vw;max-height:70vh;object-fit:contain;border-radius:8px;cursor:zoom-in;transition:transform .2s';
+        }
+      };
+      imgWrap.appendChild(img);
 
       const nextBtn = document.createElement('button');
       nextBtn.textContent = '›';
@@ -621,13 +657,13 @@ function showPhotoGallery(urlsStr, sid){
       nextBtn.onclick = function(e){ e.stopPropagation(); currentIndex = (currentIndex + 1) % urls.length; render(); };
 
       viewer.appendChild(prevBtn);
-      viewer.appendChild(img);
+      viewer.appendChild(imgWrap);
       viewer.appendChild(nextBtn);
       overlay.appendChild(viewer);
 
       const hint = document.createElement('div');
-      hint.style.cssText = 'color:#94A3B8;font-size:11px;margin-top:14px';
-      hint.textContent = 'Използвайте ← → за навигация, Esc за връщане';
+      hint.style.cssText = 'color:#94A3B8;font-size:11px;margin-top:14px;text-align:center';
+      hint.textContent = '← → навигация · Esc връщане · Клик на снимка за ЗУМ';
       overlay.appendChild(hint);
     }
   }
