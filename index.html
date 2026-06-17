@@ -232,6 +232,7 @@ body{font-family:'IBM Plex Sans',sans-serif;background:#F1F3F5;color:var(--text)
 const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbyi0HloLVLVR4AVkq--GpqQpXoz2-J7UirNOMt5ROdzP1bmNsrulVEW26A5aHhnHs4U/exec';
 const CLOUDINARY_CLOUD = 'dcmwgwwur';
 const CLOUDINARY_PRESET = 'temax_upload';
+let checkSessionId = Date.now(); // уникален ID за текущата сесия на попълване — групира снимките в отделна папка
 
 // ═══════════════════════════════════════════════════════════
 // ДАННИ — съответстват точно на Excel файла
@@ -924,6 +925,7 @@ function lockCheckForm() {
 
 function startNewCheck() {
   if (!confirm('Започване на нова проверка? Текущите данни ще се изчистят.')) return;
+  checkSessionId = Date.now(); // нова сесия — нова папка за снимки
   state = { blocking:{}, general:{}, specific:{}, notes:{}, repeat:{}, deadline:{}, photos:{} };
   buildCheckUI();
   document.getElementById('shopName').value = '';
@@ -1170,6 +1172,7 @@ function loadHistory() {
 
 function clearCheck() {
   if (!confirm('Изчистване на всички данни?')) return;
+  checkSessionId = Date.now(); // нова сесия — нова папка за снимки
   state = { blocking:{}, general:{}, specific:{}, notes:{}, repeat:{}, deadline:{}, photos:{} };
   buildCheckUI();
   document.getElementById('shopName').value = '';
@@ -1248,13 +1251,14 @@ async function uploadToCloudinary(file, sid, shop, date) {
   fd.append('file', compressed, file.name);
   fd.append('upload_preset', CLOUDINARY_PRESET);
 
-  // Използваме public_id за гарантирана структура:
-  // temax/Кърджали/2026-06-16/s3_1718553600000
+  // Структура: temax/Кърджали/2026-06-16/1718553600000/s3_1718553600123
+  // checkSessionId групира всички снимки от ЕДНА проверка в отделна подпапка —
+  // дори при няколко проверки на същия магазин/дата в един ден
   const safeShop = (shop || 'Неизвестен').trim();
   const safeDate = (date || new Date().toISOString().slice(0,10));
-  const publicId = 'temax/' + safeShop + '/' + safeDate + '/' + sid + '_' + Date.now();
+  const publicId = 'temax/' + safeShop + '/' + safeDate + '/' + checkSessionId + '/' + sid + '_' + Date.now();
 
-  fd.append('public_id', publicId); // съдържа целия път — без отделен folder параметър
+  fd.append('public_id', publicId);
 
   console.log('[ТеМАХ] Cloudinary public_id:', publicId);
 
