@@ -217,12 +217,14 @@ body{font-family:'IBM Plex Sans',sans-serif;background:#F1F3F5;color:var(--text)
 </div>
 
 <div id="view-history" class="view">
-  <div id="histFilterBar" style="background:#EDF2FF;border-bottom:1px solid #C5D4FB;padding:8px 14px;position:sticky;top:89px;z-index:50">
+  <div id="histFilterBar" style="background:#EDF2FF;border-bottom:1px solid #C5D4FB;padding:8px 14px;position:sticky;top:89px;z-index:50;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
     <div style="font-size:11px;color:#3B5BDB;font-weight:500">
       📋 Показва историята само за: <strong id="histShopLabel">—</strong>
       <span id="filterCount" style="color:#64748B;margin-left:8px"></span>
     </div>
+    <button onclick="configureMyShops()" style="padding:5px 12px;background:#fff;border:1px solid #C5D4FB;border-radius:6px;font-size:11px;font-weight:600;color:#3B5BDB;cursor:pointer;white-space:nowrap">⚙️ Моите магазини</button>
   </div>
+  <div id="sheetsHistBanner" style="display:none;padding:8px 14px;background:#F0FDF4;border-bottom:1px solid #BBF7D0;font-size:11px;color:#0A7C59"></div>
   <div class="history-view" id="historyContent">
     <p class="empty-history">Все още няма запазени проверки.</p>
   </div>
@@ -233,6 +235,29 @@ const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbyi0HloLVLVR4AVkq--G
 const CLOUDINARY_CLOUD = 'dcmwgwwur';
 const CLOUDINARY_PRESET = 'temax_upload';
 let checkSessionId = Date.now(); // уникален ID за текущата сесия на попълване — групира снимките в отделна папка
+
+// ── "Моите магазини" — за филтриране на споделена История от Sheets ──────
+function loadMyShops() {
+  try {
+    const raw = localStorage.getItem('temax_my_shops');
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+
+function configureMyShops() {
+  const current = loadMyShops();
+  const input = prompt(
+    'Кои магазини следите?\nВъведете имената, разделени със запетая.\n(Точно както ги въвеждате в полето "Магазин")',
+    current.join(', ')
+  );
+  if (input === null) return; // Cancel
+  const shops = input.split(',').map(s => s.trim()).filter(Boolean);
+  localStorage.setItem('temax_my_shops', JSON.stringify(shops));
+  showSyncNotification(shops.length ? '✅ Записани магазини: ' + shops.join(', ') : '⚠️ Няма зададени магазини', shops.length ? 'success' : 'warning');
+  renderHistory();
+}
+
+
 
 // ═══════════════════════════════════════════════════════════
 // ДАННИ — съответстват точно на Excel файла
@@ -1451,6 +1476,12 @@ function resendToSheets(entryTs) {
         updateEntrySyncStatus('checklist_history', entryTs, true);
         renderHistory();
         showSyncNotification('✅ Проверката е изпратена успешно в базата!', 'success');
+        // Изпращаме и снимките (ако има), пресъздадени локално от entry.photos
+        const entryPhotos = entry.photos || {};
+        const photoKeys = Object.keys(entryPhotos).filter(s => entryPhotos[s] && entryPhotos[s].length);
+        if (photoKeys.length) {
+          sendPhotosToSheets(entry.shop, entry.date, entryPhotos);
+        }
       } else {
         showSyncNotification('❌ Грешка при изпращане: ' + (r && r.message || 'Неуспешно'), 'error');
       }
@@ -1594,6 +1625,241 @@ function renderHistory() {
   if (shopLabel) shopLabel.textContent = currentShopForLabel || '(въведете магазин)';
   const cnt = document.getElementById('filterCount');
   if (cnt) cnt.textContent = filtered.length + ' проверки';
+
+  // ── Зареждаме споделени данни от Sheets за конфигурираните "мои магазини" ──
+  loadSheetsHistorySection(history);
+}
+
+function loadSheetsHistorySection(localHistory) {
+  const banner = document.getElementById('sheetsHistBanner');
+  const myShops = loadMyShops();
+  if (!myShops.length) {
+    if (banner) {
+      banner.style.display = 'block';
+      banner.style.background = '#FEF3C7';
+      banner.style.borderColor = '#FCD34D';
+      banner.style.color = '#B45309';
+      banner.innerHTML = '⚙️ Все още нямате зададени магазини за споделена история. Натиснете "⚙️ Моите магазини" горе, за да виждате проверки от всички устройства.';
+    }
+    const sheetsContainer = document.getElementById('sheetsHistoryContent');
+    if (sheetsContainer) sheetsContainer.remove();
+    return;
+  }
+
+  if (banner) {
+    banner.style.display = 'block';
+    banner.style.background = '#F0FDF4';
+    banner.style.borderColor = '#BBF7D0';
+    banner.style.color = '#0A7C59';
+    banner.innerHTML = '⏳ Зареждане на споделени проверки за: ' + myShops.join(', ') + '...';
+  }
+
+  const cb = '_histSheets_' + Date.now();
+  window[cb] = function(json) {
+    delete window[cb];
+    const s = document.getElementById('_histSheetsScript');
+    if (s) s.remove();
+
+    if (!json || json.status !== 'ok' || !json.data) {
+      if (banner) banner.innerHTML = '⚠️ Грешка при зареждане от базата.';
+      return;
+    }
+
+    // localTimestamps — за избягване на дублиране (записи вече показани локално)
+    const localTs = new Set(localHistory.map(e => e.ts).filter(Boolean));
+
+    const sheetsEntries = json.data.filter(d =>
+      myShops.includes(String(d.shop || '').trim()) &&
+      !localTs.has(d.savedAt)
+    );
+
+    if (!sheetsEntries.length) {
+      if (banner) banner.innerHTML = '✅ Няма допълнителни проверки от други устройства за: ' + myShops.join(', ');
+      const old = document.getElementById('sheetsHistoryContent');
+      if (old) old.remove();
+      return;
+    }
+
+    sheetsEntries.sort((a, b) => String(b.savedAt||'').localeCompare(String(a.savedAt||'')));
+
+    if (banner) banner.innerHTML = '📡 ' + sheetsEntries.length + ' допълнителни проверки от други устройства за: ' + myShops.join(', ');
+
+    let sHtml = '<div id="sheetsHistoryContent" style="margin-top:4px">';
+    sHtml += '<div style="padding:10px 14px;font-size:11px;font-weight:700;color:#64748B;text-transform:uppercase">📡 От споделената база (други устройства)</div>';
+    sheetsEntries.forEach((d, i) => {
+      const pv = d.overallPct !== null && d.overallPct !== undefined ? d.overallPct : null;
+      const pc = pv !== null ? (pv >= 85 ? 'var(--emerald)' : pv >= 60 ? 'var(--amber)' : 'var(--rose)') : 'var(--slate)';
+      const hasPhotos = d.photos && Object.keys(d.photos).filter(k => d.photos[k] && d.photos[k].length).length > 0;
+      sHtml += `<div class="history-card" style="opacity:.92">
+        <div class="history-card-hdr">
+          <div><div class="hdate">${d.shop}</div><div class="hshop">${d.date}${d.manager ? ' · ' + d.manager : ''}</div></div>
+          <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:${pc}">${pv !== null ? pv + '%' : '—'}</div>
+            <div style="font-size:11px;color:${d.bonusOk ? '#69DB7C' : '#FF8787'}">${d.bonusOk ? '✅ Бонус' : '✗ Без бонус'}</div>
+            <button onclick="printSheetsEntry(${i})" style="padding:3px 8px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:5px;color:#fff;font-size:10px;cursor:pointer;font-family:inherit">📄 PDF</button>
+          </div>
+        </div>
+        <div class="history-card-body">
+          <div style="font-size:11px;color:var(--slate)">📲 Записано от друго устройство · ${hasPhotos ? '📷 има снимки' : 'без снимки'}</div>
+          <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);display:flex;justify-content:flex-end">
+            <button onclick='resendEmailSheets(${i})' style="padding:4px 10px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;color:#fff;font-size:11px;cursor:pointer">📧 Имейл</button>
+          </div>
+        </div>
+      </div>`;
+    });
+    sHtml += '</div>';
+
+    window._sheetsHistEntries = sheetsEntries; // за PDF/имейл достъп по индекс
+
+    const old = document.getElementById('sheetsHistoryContent');
+    if (old) old.remove();
+    document.getElementById('historyContent').insertAdjacentHTML('beforeend', sHtml);
+  };
+
+  const sc = document.createElement('script');
+  sc.id = '_histSheetsScript';
+  sc.src = SHEETS_URL + '?action=getAll&callback=' + cb;
+  sc.onerror = function() { if (banner) banner.innerHTML = '⚠️ Не може да се свърже с базата.'; };
+  document.head.appendChild(sc);
+}
+
+function resendEmailSheets(idx) {
+  const d = (window._sheetsHistEntries || [])[idx];
+  if (!d) { alert('Записът не е намерен.'); return; }
+  const emailTo = prompt('Въведете имейл адрес за изпращане:', '');
+  if (!emailTo || !emailTo.includes('@')) {
+    if (emailTo !== null) alert('Невалиден имейл адрес.');
+    return;
+  }
+  const cbName = '_remailS_' + Date.now();
+  window[cbName] = function(r) {
+    delete window[cbName];
+    if (r && r.status === 'ok') {
+      showSyncNotification('✅ Имейлът е изпратен към ' + emailTo, 'success');
+    } else {
+      showSyncNotification('❌ Грешка при имейл: ' + (r && r.message || 'Неуспешно'), 'error');
+    }
+  };
+  const sc = document.createElement('script');
+  const photosObj = d.photos || {};
+  const photosSample = {};
+  Object.keys(photosObj).forEach(sid => {
+    if (photosObj[sid] && photosObj[sid].length) photosSample[sid] = photosObj[sid].slice(0, 3);
+  });
+  const photosParam = Object.keys(photosSample).length ? '&photos=' + encodeURIComponent(JSON.stringify(photosSample)) : '';
+  sc.src = SHEETS_URL + '?action=sendEmail'
+    + '&to=' + encodeURIComponent(emailTo)
+    + '&shop=' + encodeURIComponent(d.shop)
+    + '&date=' + encodeURIComponent(d.date)
+    + '&manager=' + encodeURIComponent(d.manager || '')
+    + photosParam
+    + '&callback=' + cbName;
+  sc.onerror = function() { showSyncNotification('❌ Не може да се свърже.', 'error'); };
+  document.head.appendChild(sc);
+  showSyncNotification('⏳ Изпращане на имейл...', 'warning');
+}
+
+function printSheetsEntry(idx) {
+  const d = (window._sheetsHistEntries || [])[idx];
+  if (!d) { alert('Записът не е намерен.'); return; }
+
+  const pctColor = function(p) {
+    if (p === null || p === undefined) return '#94A3B8';
+    return p >= 85 ? '#0A7C59' : p >= 60 ? '#D97706' : '#C0392B';
+  };
+
+  let sectorRows = '';
+  SECTORS.forEach(s => {
+    const p = (d.sectors && d.sectors[s.id] !== null && d.sectors[s.id] !== undefined) ? d.sectors[s.id] : null;
+    const g = (d.sectorsGen && d.sectorsGen[s.id] !== null && d.sectorsGen[s.id] !== undefined) ? d.sectorsGen[s.id] : null;
+    const sp = (d.sectorsSpec && d.sectorsSpec[s.id] !== null && d.sectorsSpec[s.id] !== undefined) ? d.sectorsSpec[s.id] : null;
+    const color = pctColor(p);
+    const bg = p === null ? '#F8FAFC' : p >= 85 ? '#E6F9F1' : p >= 60 ? '#FEF3C7' : '#FDE8E8';
+    sectorRows += `<tr style="background:${bg};border-bottom:1px solid #E2E8F0">
+      <td style="padding:6px 10px;font-size:11px">${s.name}</td>
+      <td style="padding:6px 10px;font-size:11px;text-align:center;color:#64748B">${g!==null?g+'%':'—'} / ${sp!==null?sp+'%':'—'}</td>
+      <td style="padding:6px 10px;font-size:12px;font-weight:700;text-align:center;color:${color}">${p!==null?p+'%':'—'}</td>
+      <td style="padding:6px 10px;font-size:11px;color:#64748B">${p===null?'—':p>=85?'✅ ОК':p>=60?'⚠ Внимание':'❌ Слаб'}</td>
+    </tr>`;
+  });
+
+  let notesHtml = '';
+  if (d.notes) notesHtml += `<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;margin-bottom:5px">Забележки</div><div style="border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#374151">${String(d.notes).split(' | ').join('<br>')}</div>`;
+  if (d.repeatIssues) notesHtml += `<div style="font-size:10px;font-weight:700;color:#C0392B;text-transform:uppercase;margin-bottom:5px">🔁 Повторни грешки</div><div style="border:1px solid #FECACA;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#C0392B">${d.repeatIssues}</div>`;
+  if (d.deadlines) notesHtml += `<div style="font-size:10px;font-weight:700;color:#B45309;text-transform:uppercase;margin-bottom:5px">⏰ Срокове</div><div style="border:1px solid #FCD34D;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#B45309">${String(d.deadlines).split(' | ').join('<br>')}</div>`;
+
+  let photosHtml = '';
+  const photoSecIds = d.photos ? Object.keys(d.photos).filter(sid => d.photos[sid] && d.photos[sid].length) : [];
+  if (photoSecIds.length) {
+    photosHtml += '<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.05em;margin:16px 0 8px">📷 Снимки по сектори</div>';
+    photoSecIds.forEach(sid => {
+      const s = SECTORS.find(x => x.id === sid);
+      photosHtml += `<div style="margin-bottom:10px;page-break-inside:avoid"><div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">${s?s.name:sid}</div><div style="display:flex;flex-wrap:wrap;gap:6px">`;
+      d.photos[sid].forEach(url => { photosHtml += `<img src="${url}" style="width:150px;height:110px;object-fit:cover;border-radius:4px;border:1px solid #E2E8F0">`; });
+      photosHtml += '</div></div>';
+    });
+  }
+
+  const bonusColor = d.bonusOk ? '#0A7C59' : '#C0392B';
+  const pctVal = d.overallPct !== null && d.overallPct !== undefined ? d.overallPct : null;
+
+  const pw = window.open('', '_blank');
+  pw.document.write(`<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8"><title>ТеМАХ — ${d.shop} — ${d.date}</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>
+<style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#0F172A;background:#fff}table{width:100%;border-collapse:collapse}@page{margin:15mm;size:A4 portrait}
+.no-print{margin-bottom:16px;display:flex;gap:10px;justify-content:center}
+.btn-action{padding:10px 22px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}
+@media print{.no-print{display:none}}
+</style></head><body>
+<div class="no-print">
+  <button class="btn-action" style="background:#0D1B2A;color:#fff" onclick="window.print()">🖨️ Печат</button>
+  <button class="btn-action" id="dlBtn" style="background:#3B5BDB;color:#fff" onclick="downloadPdf()">⬇️ Свали PDF</button>
+  <button class="btn-action" style="background:#E2E8F0;color:#374151" onclick="window.close()">✕ Затвори</button>
+</div>
+<div id="pdfContent">
+<div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:3px solid #0D1B2A;margin-bottom:16px">
+  <div><div style="font-size:22px;font-weight:800">ТеМАХ — Контролна карта</div><div style="font-size:11px;color:#64748B">Споделена база — записано от друго устройство</div></div>
+  <div style="text-align:right"><div style="font-size:28px;font-weight:800;color:${bonusColor}">${pctVal!==null?pctVal+'%':'—'}</div>
+  <div style="font-size:13px;font-weight:700;color:${bonusColor}">${d.bonusOk?'✅ БОНУС ОДОБРЕН':'✗ БЕЗ БОНУС'}</div></div>
+</div>
+<table style="margin-bottom:14px"><tr>
+  <td style="padding:6px 8px;background:#F8FAFC;border:1px solid #e2e8f0"><div style="font-size:9px;font-weight:700;color:#64748B;text-transform:uppercase">Магазин</div><div style="font-size:14px;font-weight:700">${d.shop}</div></td>
+  <td style="padding:6px 8px;background:#F8FAFC;border:1px solid #e2e8f0"><div style="font-size:9px;font-weight:700;color:#64748B;text-transform:uppercase">Дата</div><div style="font-size:14px;font-weight:700">${d.date}</div></td>
+  <td style="padding:6px 8px;background:#F8FAFC;border:1px solid #e2e8f0"><div style="font-size:9px;font-weight:700;color:#64748B;text-transform:uppercase">Управител</div><div style="font-size:14px;font-weight:700">${d.manager||'—'}</div></td>
+</tr></table>
+<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;margin-bottom:5px">Резултати по сектори</div>
+<table style="border:1px solid #e2e8f0">
+<thead><tr style="background:#0D1B2A">
+  <th style="padding:7px 10px;font-size:10px;color:#94A3B8;text-align:left;text-transform:uppercase">Сектор</th>
+  <th style="padding:7px 10px;font-size:10px;color:#94A3B8;text-align:center;text-transform:uppercase">Общи / Специф.</th>
+  <th style="padding:7px 10px;font-size:10px;color:#94A3B8;text-align:center;text-transform:uppercase">Обща %</th>
+  <th style="padding:7px 10px;font-size:10px;color:#94A3B8;text-align:left;text-transform:uppercase">Статус</th>
+</tr></thead><tbody>${sectorRows}</tbody></table>
+${notesHtml}
+${photosHtml}
+<div style="margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:10px;color:#94A3B8;display:flex;justify-content:space-between">
+  <span>ТеМАХ · Контролна карта</span><span>Генерирано: ${new Date().toLocaleString('bg-BG')}</span>
+</div>
+</div>
+<script>
+function downloadPdf(){
+  const btn = document.getElementById('dlBtn');
+  btn.textContent = '⏳ Генериране...'; btn.disabled = true;
+  html2pdf().set({
+    margin: 10,
+    filename: 'TeMAX_${d.shop}_${d.date}.pdf',
+    image: { type: 'jpeg', quality: 0.92 },
+    html2canvas: { scale: 2, useCORS: true },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+  }).from(document.getElementById('pdfContent')).save().then(function(){
+    btn.textContent = '⬇️ Свали PDF'; btn.disabled = false;
+  }).catch(function(err){
+    btn.textContent = '⬇️ Свали PDF'; btn.disabled = false;
+    alert('Грешка: ' + err);
+  });
+}
+<\/script></body></html>`);
+  pw.document.close();
 }
 
 function buildShopFilter(history) {
