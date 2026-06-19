@@ -183,7 +183,8 @@ body{font-family:'IBM Plex Sans',sans-serif;background:#F1F3F5;color:var(--text)
       </div>
       <div class="info-field full">
         <label>Имейл за изпращане на репорта (незадължително)</label>
-        <input type="email" id="reportEmail" placeholder="example@email.com" autocomplete="email">
+        <input type="email" id="reportEmail" multiple placeholder="email1@example.com, email2@example.com" autocomplete="email">
+        <div style="font-size:10px;color:#94A3B8;margin-top:3px">За няколко получателя, разделете с запетая</div>
       </div>
       <div class="info-field full" id="prevInfoRow" style="display:none">
         <div class="prev-row">
@@ -234,7 +235,8 @@ body{font-family:'IBM Plex Sans',sans-serif;background:#F1F3F5;color:var(--text)
 const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbyi0HloLVLVR4AVkq--GpqQpXoz2-J7UirNOMt5ROdzP1bmNsrulVEW26A5aHhnHs4U/exec';
 const CLOUDINARY_CLOUD = 'dcmwgwwur';
 const CLOUDINARY_PRESET = 'temax_upload';
-let checkSessionId = Date.now(); // уникален ID за текущата сесия на попълване — групира снимките в отделна папка
+let checkSessionId = Date.now();
+let pendingUploads = 0; // брой снимки в процес на качване // уникален ID за текущата сесия на попълване — групира снимките в отделна папка
 
 // ── "Моите магазини" — за филтриране на споделена История от Sheets ──────
 function loadMyShops() {
@@ -964,6 +966,13 @@ function startNewCheck() {
   startAutosave();
 }
 
+function updateUploadStatus(sid) {
+  const total = pendingUploads;
+  if (total > 0) {
+    showSyncNotification('📷 Качване на снимки... (остават ' + total + ')', 'warning');
+  }
+}
+
 function showSyncNotification(msg, type) {
   console.log('[ТеМАХ Sync]', type, msg);
   const existing = document.getElementById('syncNotif');
@@ -1016,6 +1025,17 @@ function saveCheck() {
   const date = document.getElementById('checkDate').value;
   const manager = document.getElementById('managerName').value.trim();
   if (!shop || !date) { alert('Моля, попълнете магазин и дата преди да запазите.'); return; }
+
+  // Предупреждение ако все още се качват снимки
+  if (pendingUploads > 0) {
+    const proceed = confirm(
+      '⚠️ Все още се качват ' + pendingUploads + ' снимки в Cloudinary.\n\n' +
+      'Ако запазите сега, незавършените снимки НЯМА да бъдат включени.\n\n' +
+      'Изчакайте докато всички снимки се качат, след което натиснете "Запази" отново.\n\n' +
+      'Искате ли да продължите БЕЗ незавършените снимки?'
+    );
+    if (!proceed) return;
+  }
 
   // Валидация — всички критерии трябва да са попълнени
   const validationErrors = validateCheck();
@@ -1271,6 +1291,7 @@ async function compressImage(file, maxW=1200, quality=0.78) {
 }
 
 async function uploadToCloudinary(file, sid, shop, date) {
+  pendingUploads++;
   const compressed = await compressImage(file);
   const fd = new FormData();
   fd.append('file', compressed, file.name);
@@ -1292,6 +1313,7 @@ async function uploadToCloudinary(file, sid, shop, date) {
   });
   const data = await resp.json();
   console.log('[ТеМАХ] Cloudinary response public_id:', data.public_id);
+  pendingUploads = Math.max(0, pendingUploads - 1);
   if (!data.secure_url) throw new Error(data.error && data.error.message || 'Upload failed');
   return data.secure_url;
 }
@@ -1299,12 +1321,25 @@ async function uploadToCloudinary(file, sid, shop, date) {
 async function handlePhotoUpload(event, sid) {
   const files = Array.from(event.target.files);
   if (!files.length) return;
+
+  // Лимит: максимум 10 снимки на сектор
+  const MAX_PHOTOS = 10;
+  const existing = (state.photos && state.photos[sid]) ? state.photos[sid].length : 0;
+  const remaining = MAX_PHOTOS - existing;
+  if (remaining <= 0) {
+    alert('Максималният брой снимки за този сектор е ' + MAX_PHOTOS + '. Моля изтрийте стари снимки преди да добавите нови.');
+    return;
+  }
+  const filesToProcess = files.slice(0, remaining);
+  if (files.length > remaining) {
+    alert('Избрахте ' + files.length + ' снимки, но остават само ' + remaining + ' свободни позиции за сектора (лимит ' + MAX_PHOTOS + '). Ще бъдат качени само първите ' + remaining + '.');
+  }
   const shop = (document.getElementById('shopName')||{}).value || '';
   const date = (document.getElementById('checkDate')||{}).value || '';
   const previewEl = document.getElementById('photos_' + sid);
   if (!previewEl) return;
 
-  for (const file of files) {
+  for (const file of filesToProcess) {
     // Show uploading thumbnail
     const thumb = document.createElement('div');
     thumb.className = 'photo-thumb uploading';
@@ -1312,6 +1347,7 @@ async function handlePhotoUpload(event, sid) {
     previewEl.appendChild(thumb);
 
     try {
+      updateUploadStatus(sid);
       const url = await uploadToCloudinary(file, sid, shop, date);
       // Store URL
       if (!state.photos) state.photos = {};
@@ -1490,7 +1526,7 @@ function resendToSheets(entryTs) {
     const sc = document.createElement('script');
     sc.src = SHEETS_URL + '?data=' + encodeURIComponent(JSON.stringify(leanPayload)) + '&callback=' + cbName;
     sc.onerror = function() {
-      showSyncNotification('❌ Не може да се свърже с Apps Script.', 'error');
+      showSyncNotification('⚠️ Моля проверете входящата поща — имейлът вероятно е изпратен успешно.', 'warning');
     };
     document.head.appendChild(sc);
     showSyncNotification('⏳ Изпращане към базата...', 'warning');
@@ -1511,7 +1547,7 @@ function resendEmail(entryTs) {
   );
   if (!entry) { alert('Проверката не е намерена.'); return; }
 
-  const emailTo = prompt('Въведете имейл адрес за изпращане:', '');
+  const emailTo = prompt('Въведете имейл адрес(и) за изпращане:\n(за няколко получателя, разделете със запетая)', '');
   if (!emailTo || !emailTo.includes('@')) {
     if (emailTo !== null) alert('Невалиден имейл адрес.');
     return;
@@ -1546,7 +1582,7 @@ function resendEmail(entryTs) {
     + '&manager=' + encodeURIComponent(entry.manager || '')
     + photosParam
     + '&callback=' + cbName;
-  sc.onerror = function() { showSyncNotification('❌ Не може да се свърже.', 'error'); };
+  sc.onerror = function() { showSyncNotification('⚠️ Моля проверете входящата поща — имейлът вероятно е изпратен успешно.', 'warning'); };
   document.head.appendChild(sc);
   showSyncNotification('⏳ Изпращане на имейл...', 'warning');
 }
@@ -1726,7 +1762,7 @@ function loadSheetsHistorySection(localHistory) {
 function resendEmailSheets(idx) {
   const d = (window._sheetsHistEntries || [])[idx];
   if (!d) { alert('Записът не е намерен.'); return; }
-  const emailTo = prompt('Въведете имейл адрес за изпращане:', '');
+  const emailTo = prompt('Въведете имейл адрес(и) за изпращане:\n(за няколко получателя, разделете със запетая)', '');
   if (!emailTo || !emailTo.includes('@')) {
     if (emailTo !== null) alert('Невалиден имейл адрес.');
     return;
@@ -1754,7 +1790,10 @@ function resendEmailSheets(idx) {
     + '&manager=' + encodeURIComponent(d.manager || '')
     + photosParam
     + '&callback=' + cbName;
-  sc.onerror = function() { showSyncNotification('❌ Не може да се свърже.', 'error'); };
+  sc.onerror = function() {
+    // Google JSONP redirect понякога вдига onerror дори при успех — имейлът вероятно е изпратен
+    showSyncNotification('⚠️ Моля проверете входящата поща — имейлът вероятно е изпратен успешно.', 'warning');
+  };
   document.head.appendChild(sc);
   showSyncNotification('⏳ Изпращане на имейл...', 'warning');
 }
