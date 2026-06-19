@@ -1580,6 +1580,7 @@ function resendEmail(entryTs) {
     + '&shop=' + encodeURIComponent(entry.shop)
     + '&date=' + encodeURIComponent(entry.date)
     + '&manager=' + encodeURIComponent(entry.manager || '')
+    + '&ts=' + encodeURIComponent(entry.ts || '')
     + photosParam
     + '&callback=' + cbName;
   sc.onerror = function() { showSyncNotification('⚠️ Моля проверете входящата поща — имейлът вероятно е изпратен успешно.', 'warning'); };
