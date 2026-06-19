@@ -1137,22 +1137,14 @@ function saveCheck() {
           }
         };
         const emailScript = document.createElement('script');
-        // Включваме снимки от photosToSend (max 3 на сектор за URL лимит)
-        const autoPhotosSample = {};
-        Object.keys(photosToSend).forEach(sid => {
-          if (photosToSend[sid] && photosToSend[sid].length)
-            autoPhotosSample[sid] = photosToSend[sid].slice(0, 3);
-        });
-        const autoPhotosParam = Object.keys(autoPhotosSample).length
-          ? '&photos=' + encodeURIComponent(JSON.stringify(autoPhotosSample))
-          : '';
+        // Снимките са вече изпратени в Sheets от sendPhotosToSheets() по-горе
+        // НЕ ги включваме в URL-а — Apps Script ги чете от колона 66
         emailScript.src = sheetsUrl
           + '?action=sendEmail'
           + '&to='      + encodeURIComponent(emailTo)
           + '&shop='    + encodeURIComponent(shop)
           + '&date='    + encodeURIComponent(date)
           + '&manager=' + encodeURIComponent(manager)
-          + autoPhotosParam
           + '&callback=' + emailCb;
         document.head.appendChild(emailScript);
       }, 15000); // 15 секунди — след като снимките са записани в Sheets
@@ -1553,25 +1545,15 @@ function resendEmail(entryTs) {
     return;
   }
 
-  const entryPhotos = entry.photos || {};
-  const photosSample = {};
-  Object.keys(entryPhotos).forEach(sid => {
-    if (entryPhotos[sid] && entryPhotos[sid].length) {
-      photosSample[sid] = entryPhotos[sid].slice(0, 3);
-    }
-  });
-  const photosParam = Object.keys(photosSample).length
-    ? '&photos=' + encodeURIComponent(JSON.stringify(photosSample))
-    : '';
-
+  // Снимките са вече в Sheets (колона 66) — Apps Script ги чете директно
+  // НЕ ги изпращаме в URL-а за да избегнем "URL Too Large" грешка
   const emailUrl = SHEETS_URL
     + '?action=sendEmail'
     + '&to=' + encodeURIComponent(emailTo)
     + '&shop=' + encodeURIComponent(entry.shop)
     + '&date=' + encodeURIComponent(entry.date)
     + '&manager=' + encodeURIComponent(entry.manager || '')
-    + '&ts=' + encodeURIComponent(entry.ts || '')
-    + photosParam;
+    + '&ts=' + encodeURIComponent(entry.ts || '');
 
   showSyncNotification('⏳ Изпращане на имейл...', 'warning');
   sendEmailWithRetry(emailUrl, emailTo, 1);
@@ -1793,35 +1775,14 @@ function resendEmailSheets(idx) {
     if (emailTo !== null) alert('Невалиден имейл адрес.');
     return;
   }
-  const cbName = '_remailS_' + Date.now();
-  window[cbName] = function(r) {
-    delete window[cbName];
-    if (r && r.status === 'ok') {
-      showSyncNotification('✅ Имейлът е изпратен към ' + emailTo, 'success');
-    } else {
-      showSyncNotification('❌ Грешка при имейл: ' + (r && r.message || 'Неуспешно'), 'error');
-    }
-  };
-  const sc = document.createElement('script');
-  const photosObj = d.photos || {};
-  const photosSample = {};
-  Object.keys(photosObj).forEach(sid => {
-    if (photosObj[sid] && photosObj[sid].length) photosSample[sid] = photosObj[sid].slice(0, 3);
-  });
-  const photosParam = Object.keys(photosSample).length ? '&photos=' + encodeURIComponent(JSON.stringify(photosSample)) : '';
-  sc.src = SHEETS_URL + '?action=sendEmail'
+  // Снимките се четат от Sheets (колона 66) — не ги изпращаме в URL
+  const emailUrlS = SHEETS_URL + '?action=sendEmail'
     + '&to=' + encodeURIComponent(emailTo)
     + '&shop=' + encodeURIComponent(d.shop)
     + '&date=' + encodeURIComponent(d.date)
-    + '&manager=' + encodeURIComponent(d.manager || '')
-    + photosParam
-    + '&callback=' + cbName;
-  sc.onerror = function() {
-    // Google JSONP redirect понякога вдига onerror дори при успех — имейлът вероятно е изпратен
-    showSyncNotification('⚠️ Моля проверете входящата поща — имейлът вероятно е изпратен успешно.', 'warning');
-  };
-  document.head.appendChild(sc);
+    + '&manager=' + encodeURIComponent(d.manager || '');
   showSyncNotification('⏳ Изпращане на имейл...', 'warning');
+  sendEmailWithRetry(emailUrlS, emailTo, 1);
 }
 
 function printSheetsEntry(idx) {
