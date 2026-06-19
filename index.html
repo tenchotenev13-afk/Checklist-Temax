@@ -1553,39 +1553,64 @@ function resendEmail(entryTs) {
     return;
   }
 
-  const cbName = '_remail_' + Date.now();
-  window[cbName] = function(r) {
-    delete window[cbName];
-    if (r && r.status === 'ok') {
-      showSyncNotification('✅ Имейлът е изпратен към ' + emailTo, 'success');
-    } else {
-      showSyncNotification('❌ Грешка при имейл: ' + (r && r.message || 'Неуспешно'), 'error');
-    }
-  };
-  const sc = document.createElement('script');
-  // Включваме снимките от localStorage (до 10 URL-а за да не надвиши URL лимита)
   const entryPhotos = entry.photos || {};
   const photosSample = {};
   Object.keys(entryPhotos).forEach(sid => {
     if (entryPhotos[sid] && entryPhotos[sid].length) {
-      photosSample[sid] = entryPhotos[sid].slice(0, 3); // max 3 снимки на сектор
+      photosSample[sid] = entryPhotos[sid].slice(0, 3);
     }
   });
   const photosParam = Object.keys(photosSample).length
     ? '&photos=' + encodeURIComponent(JSON.stringify(photosSample))
     : '';
-  sc.src = SHEETS_URL
+
+  const emailUrl = SHEETS_URL
     + '?action=sendEmail'
     + '&to=' + encodeURIComponent(emailTo)
     + '&shop=' + encodeURIComponent(entry.shop)
     + '&date=' + encodeURIComponent(entry.date)
     + '&manager=' + encodeURIComponent(entry.manager || '')
     + '&ts=' + encodeURIComponent(entry.ts || '')
-    + photosParam
-    + '&callback=' + cbName;
-  sc.onerror = function() { showSyncNotification('⚠️ Моля проверете входящата поща — имейлът вероятно е изпратен успешно.', 'warning'); };
-  document.head.appendChild(sc);
+    + photosParam;
+
   showSyncNotification('⏳ Изпращане на имейл...', 'warning');
+  sendEmailWithRetry(emailUrl, emailTo, 1);
+}
+
+function sendEmailWithRetry(emailUrl, emailTo, attempt) {
+  const MAX_ATTEMPTS = 3;
+  const cbName = '_remail_' + Date.now();
+
+  window[cbName] = function(r) {
+    const sc = document.getElementById(cbName);
+    if (sc) sc.remove();
+    delete window[cbName];
+    if (r && r.status === 'ok') {
+      showSyncNotification('✅ Имейлът е изпратен към ' + emailTo, 'success');
+    } else {
+      showSyncNotification('❌ Грешка: ' + (r && r.message || 'Неуспешно'), 'error');
+    }
+  };
+
+  const sc = document.createElement('script');
+  sc.id = cbName;
+  sc.src = emailUrl + '&callback=' + cbName;
+
+  sc.onerror = function() {
+    if (sc.parentNode) sc.remove();
+    delete window[cbName];
+    if (attempt < MAX_ATTEMPTS) {
+      const delay = attempt * 4000; // 4 сек, 8 сек
+      showSyncNotification('⏳ Retry ' + attempt + '/' + (MAX_ATTEMPTS-1) + ' — изчакване ' + (delay/1000) + ' сек...', 'warning');
+      setTimeout(function() {
+        sendEmailWithRetry(emailUrl, emailTo, attempt + 1);
+      }, delay);
+    } else {
+      showSyncNotification('❌ Имейлът не може да се изпрати след ' + MAX_ATTEMPTS + ' опита. Моля опитайте отново.', 'error');
+    }
+  };
+
+  document.head.appendChild(sc);
 }
 
 function renderHistory() {
