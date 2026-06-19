@@ -1127,32 +1127,24 @@ function saveCheck() {
     // Изпращаме имейл САМО след потвърждение, че данните са записани
     if (emailTo && pctVal !== null) {
       setTimeout(function() {
-        const emailCb = '_emailCb' + Date.now();
-        window[emailCb] = function(er) {
-          delete window[emailCb];
-          if (er && er.status === 'ok') {
-            console.log('✅ Имейл изпратен към', emailTo);
-          } else {
-            console.warn('❌ Имейл грешка:', er && er.message);
-          }
-        };
-        const emailScript = document.createElement('script');
-        // Снимките са вече изпратени в Sheets от sendPhotosToSheets() по-горе
-        // НЕ ги включваме в URL-а — Apps Script ги чете от колона 66
-        emailScript.src = sheetsUrl
+        // Автоматичен имейл — използва sendEmailWithRetry за надеждност
+        // Снимките се четат от Sheets (колона 66) — URL-ът е кратък
+        const autoEmailUrl = sheetsUrl
           + '?action=sendEmail'
           + '&to='      + encodeURIComponent(emailTo)
           + '&shop='    + encodeURIComponent(shop)
           + '&date='    + encodeURIComponent(date)
           + '&manager=' + encodeURIComponent(manager)
-          + '&callback=' + emailCb;
-        document.head.appendChild(emailScript);
+          + '&ts='      + encodeURIComponent(savedTs || '');
+        showSyncNotification('📧 Изпращане на имейл...', 'warning');
+        sendEmailWithRetry(autoEmailUrl, emailTo, 1);
       }, 15000); // 15 секунди — след като снимките са записани в Sheets
     }
   };
 
   // Запазваме копие на снимките ПРЕДИ да се изчистят от state
   const photosToSend = JSON.parse(JSON.stringify(state.photos || {}));
+  const savedTs = entry.ts || ''; // timestamp на записа за точно намиране
   const photoSectors = Object.keys(photosToSend).filter(s => photosToSend[s] && photosToSend[s].length);
   console.log('[ТеМАХ] Снимки при запазване:', photoSectors.length, 'сектора:', photoSectors.join(', '));
 
