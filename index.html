@@ -1191,7 +1191,7 @@ function saveCheck() {
     shop, date, manager, savedAt: entry.ts,
     avgPct: pct, bonusOk, blockFail: blockingFail,
     sectorData, state: entry.state,
-    notes: notesArr.join(' | ').slice(0, 1500), repeatIssues: repeatArr.join(', '), deadlines: deadlineArr.join(' | '),
+    notes: notesArr.join(' | ').slice(0, 50), repeatIssues: repeatArr.join(', '), deadlines: deadlineArr.join(' | '),
   };
   // Изпращане на данни чрез Script tag (JSONP) — по-надеждно от Image
   const leanPayload = {
@@ -1200,10 +1200,10 @@ function saveCheck() {
     blocking: state.blocking,
     sectorData,
     // Лимит: Apps Script URL параметри имат ~4KB лимит след декодиране
-    notes: notesArr.join(' | ').slice(0, 1500),
-    generalComment: (document.getElementById('generalComment').value || '').trim().slice(0, 400),
-    repeatIssues: repeatArr.join(', ').slice(0, 500),
-    deadlines: deadlineArr.join(' | ').slice(0, 500),
+    notes: notesArr.join(' | ').slice(0, 150),
+    generalComment: (document.getElementById('generalComment').value || '').trim().slice(0, 50),
+    repeatIssues: repeatArr.join(', ').slice(0, 50),
+    deadlines: deadlineArr.join(' | ').slice(0, 50),
   };
   const emailTo = document.getElementById('reportEmail').value.trim();
   const pctVal  = pct !== null ? Math.round(pct * 100) : null;
@@ -1599,9 +1599,9 @@ function resendToSheets(entryTs) {
       blockFail:     entry.blockingFail || entry.blockFail || false,
       blocking:      (entry.state && entry.state.blocking) || {},
       sectorData:    sectorData,
-      notes:         notesArr.join(' | ').slice(0, 1500),
-      repeatIssues:  repeatArr.join(', ').slice(0, 500),
-      deadlines:     deadlineArr.join(' | ').slice(0, 500),
+      notes:         notesArr.join(' | ').slice(0, 150),
+      repeatIssues:  repeatArr.join(', ').slice(0, 100),
+      deadlines:     deadlineArr.join(' | ').slice(0, 100),
       generalComment: entry.generalComment || '',
     };
 
