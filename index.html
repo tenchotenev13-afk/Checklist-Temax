@@ -2218,6 +2218,7 @@ function printEntry(idx) {
   // Снимки по сектори от запазената проверка
   const entryPhotos = entry.photos || (entry.state && entry.state.photos) || {};
   const photoSecIds = Object.keys(entryPhotos).filter(sid => entryPhotos[sid] && entryPhotos[sid].length);
+  console.log('[printEntry] Сектори със снимки:', photoSecIds.length, photoSecIds);
   let photosHtml = '';
   if (photoSecIds.length) {
     photosHtml += '<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.05em;margin:16px 0 8px">📷 Снимки по сектори</div>';
