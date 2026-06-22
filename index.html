@@ -1081,7 +1081,7 @@ function saveCheck() {
     shop, date, manager, savedAt: entry.ts,
     avgPct: pct, bonusOk, blockFail: blockingFail,
     sectorData, state: entry.state,
-    notes: notesArr.join(' | ').slice(0, 600), repeatIssues: repeatArr.join(', '), deadlines: deadlineArr.join(' | '),
+    notes: notesArr.join(' | ').slice(0, 1500), repeatIssues: repeatArr.join(', '), deadlines: deadlineArr.join(' | '),
   };
   // Изпращане на данни чрез Script tag (JSONP) — по-надеждно от Image
   const leanPayload = {
@@ -1090,10 +1090,10 @@ function saveCheck() {
     blocking: state.blocking,
     sectorData,
     // Лимит: Apps Script URL параметри имат ~4KB лимит след декодиране
-    notes: notesArr.join(' | ').slice(0, 600),
+    notes: notesArr.join(' | ').slice(0, 1500),
     generalComment: (document.getElementById('generalComment').value || '').trim().slice(0, 400),
-    repeatIssues: repeatArr.join(', ').slice(0, 250),
-    deadlines: deadlineArr.join(' | ').slice(0, 250),
+    repeatIssues: repeatArr.join(', ').slice(0, 500),
+    deadlines: deadlineArr.join(' | ').slice(0, 500),
   };
   const emailTo = document.getElementById('reportEmail').value.trim();
   const pctVal  = pct !== null ? Math.round(pct * 100) : null;
@@ -1485,9 +1485,9 @@ function resendToSheets(entryTs) {
       blockFail:     entry.blockingFail || entry.blockFail || false,
       blocking:      (entry.state && entry.state.blocking) || {},
       sectorData:    sectorData,
-      notes:         notesArr.join(' | ').slice(0, 600),
-      repeatIssues:  repeatArr.join(', ').slice(0, 250),
-      deadlines:     deadlineArr.join(' | ').slice(0, 250),
+      notes:         notesArr.join(' | ').slice(0, 1500),
+      repeatIssues:  repeatArr.join(', ').slice(0, 500),
+      deadlines:     deadlineArr.join(' | ').slice(0, 500),
       generalComment: entry.generalComment || '',
     };
 
@@ -1539,15 +1539,42 @@ function resendEmail(entryTs) {
     return;
   }
 
-  // Снимките са вече в Sheets (колона 66) — Apps Script ги чете директно
-  // НЕ ги изпращаме в URL-а за да избегнем "URL Too Large" грешка
+  // Включваме пълните бележки от localStorage (без лимит)
+  // Apps Script ще ги ползва вместо съкратените от Sheets
+  const st = (entry.state) || {};
+  const fullNotesArr = [];
+  const fullRepeatArr = [];
+  const fullDeadlineArr = [];
+  SECTORS.forEach(function(sec) {
+    ['clean','labels','arrange','pallet','corridor','high'].forEach(function(gk) {
+      const key = sec.id + '_' + gk;
+      if (st.notes && st.notes[key]) fullNotesArr.push(criterionLabel(key) + ': ' + st.notes[key]);
+      if (st.repeat && st.repeat[key] === 'Y') fullRepeatArr.push(criterionLabel(key));
+      if (st.deadline && st.deadline[key]) fullDeadlineArr.push(criterionLabel(key) + ': ' + st.deadline[key]);
+    });
+    if (sec.specific) sec.specific.forEach(function(sp, i) {
+      const key = sec.id + '_' + (i+1);
+      if (st.notes && st.notes[key]) fullNotesArr.push(criterionLabel(key) + ': ' + st.notes[key]);
+      if (st.repeat && st.repeat[key] === 'Y') fullRepeatArr.push(criterionLabel(key));
+      if (st.deadline && st.deadline[key]) fullDeadlineArr.push(criterionLabel(key) + ': ' + st.deadline[key]);
+    });
+    BLOCKING.forEach(function(b, bi) {
+      const key = 'b' + (bi+1);
+      if (st.notes && st.notes[key]) fullNotesArr.push(criterionLabel(key) + ': ' + st.notes[key]);
+    });
+  });
+
   const emailUrl = SHEETS_URL
     + '?action=sendEmail'
     + '&to=' + encodeURIComponent(emailTo)
     + '&shop=' + encodeURIComponent(entry.shop)
     + '&date=' + encodeURIComponent(entry.date)
     + '&manager=' + encodeURIComponent(entry.manager || '')
-    + '&ts=' + encodeURIComponent(entry.ts || '');
+    + '&ts=' + encodeURIComponent(entry.ts || '')
+    + (fullNotesArr.length ? '&fullNotes=' + encodeURIComponent(fullNotesArr.join(' | ').slice(0, 2000)) : '')
+    + (fullRepeatArr.length ? '&fullRepeat=' + encodeURIComponent(fullRepeatArr.join(', ').slice(0, 500)) : '')
+    + (fullDeadlineArr.length ? '&fullDeadline=' + encodeURIComponent(fullDeadlineArr.join(' | ').slice(0, 500)) : '')
+    + (entry.generalComment ? '&generalComment=' + encodeURIComponent(entry.generalComment.slice(0, 400)) : '');
 
   showSyncNotification('⏳ Изпращане на имейл...', 'warning');
   sendEmailWithRetry(emailUrl, emailTo, 1);
