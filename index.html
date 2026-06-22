@@ -1049,11 +1049,13 @@ function saveCheck() {
   SECTORS.forEach(s => { sectorResults[s.id] = getSectorScore(s); });
 
   const entryId = Date.now();
+  const generalCommentVal = (document.getElementById('generalComment') || {}).value || '';
   const entry = {
     id: entryId, shop, date, manager,
     pct, bonusOk, blockingFail, sectorResults,
+    generalComment: generalCommentVal,
     state: JSON.parse(JSON.stringify(state)),
-    photos: JSON.parse(JSON.stringify(state.photos || {})), // запазваме URLs локално
+    photos: JSON.parse(JSON.stringify(state.photos || {})),
     ts: new Date().toISOString(),
     synced: false,
   };
@@ -2077,7 +2079,9 @@ function printEntry(idx) {
     const st = entry.state;
     const nKeys = Object.keys(st.notes||{}).filter(k=>st.notes[k]);
     const rKeys = Object.keys(st.repeat||{}).filter(k=>st.repeat[k]==='Y');
-    const allK = [...new Set([...nKeys,...rKeys])];
+    // Включваме и бележките към блокиращи критерии (b1, b2...)
+    const bKeys = Object.keys(st.blocking||{}).filter(k=>st.blocking[k]==='N' && st.notes&&st.notes[k]);
+    const allK = [...new Set([...nKeys,...rKeys,...bKeys])];
     if (allK.length) {
       entryNotesHtml += '<table style="width:100%;border-collapse:collapse;font-size:11px">';
       entryNotesHtml += '<tr style="background:#0D1B2A"><th style="padding:6px 10px;color:#94A3B8;text-align:left;font-size:9px;text-transform:uppercase">Критерий</th><th style="padding:6px 10px;color:#94A3B8;text-align:left;font-size:9px;text-transform:uppercase">Коментар</th><th style="padding:6px 10px;color:#94A3B8;text-align:left;font-size:9px;text-transform:uppercase">Повт. грешка</th><th style="padding:6px 10px;color:#94A3B8;text-align:left;font-size:9px;text-transform:uppercase">Срок / Отговорник</th></tr>';
@@ -2143,6 +2147,9 @@ function printEntry(idx) {
 ${entryNotesHtml?`
 <div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.05em;margin:16px 0 5px">Забележки и коментари</div>
 <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;margin-bottom:14px">${entryNotesHtml}</div>`:''}
+${(entry.generalComment||'').trim()?`
+<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.05em;margin:0 0 5px">Допълнителни бележки</div>
+<div style="padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:12px;color:#374151;white-space:pre-wrap;margin-bottom:14px">${entry.generalComment}</div>`:''}
 ${photosHtml}
 <div style="margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:10px;color:#94A3B8;display:flex;justify-content:space-between">
   <span>ТеМАХ · Контролна карта</span><span>Генерирано: ${new Date().toLocaleString('bg-BG')}</span>
