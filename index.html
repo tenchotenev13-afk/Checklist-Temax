@@ -973,6 +973,116 @@ function updateUploadStatus(sid) {
   }
 }
 
+
+// ── Изпращане на пълни бележки към Sheets (на части за неограничен размер) ──
+function sendNotesToSheets(shop, date, ts, st, generalComment) {
+  if (!st) return;
+
+  // Събираме ВСИЧКИ бележки по сектори
+  const sectorNotes = {}; // {sid: {notes:[], repeat:[], deadline:[]}}
+  SECTORS.forEach(sec => {
+    const sn = {notes:[], repeat:[], deadline:[]};
+    ['clean','labels','arrange','pallet','corridor','high'].forEach(gk => {
+      const key = sec.id + '_' + gk;
+      if (st.notes && st.notes[key]) sn.notes.push(criterionLabel(key) + ': ' + st.notes[key]);
+      if (st.repeat && st.repeat[key] === 'Y') sn.repeat.push(criterionLabel(key));
+      if (st.deadline && st.deadline[key]) sn.deadline.push(criterionLabel(key) + ': ' + st.deadline[key]);
+    });
+    if (sec.specific) sec.specific.forEach((sp, i) => {
+      const key = sec.id + '_' + (i+1);
+      if (st.notes && st.notes[key]) sn.notes.push(criterionLabel(key) + ': ' + st.notes[key]);
+      if (st.repeat && st.repeat[key] === 'Y') sn.repeat.push(criterionLabel(key));
+      if (st.deadline && st.deadline[key]) sn.deadline.push(criterionLabel(key) + ': ' + st.deadline[key]);
+    });
+    if (sn.notes.length || sn.repeat.length || sn.deadline.length) {
+      sectorNotes[sec.id] = sn;
+    }
+  });
+  // Блокиращи
+  const blockNotes = [];
+  BLOCKING.forEach((b, bi) => {
+    const key = 'b' + (bi+1);
+    if (st.notes && st.notes[key]) blockNotes.push(criterionLabel(key) + ': ' + st.notes[key]);
+  });
+
+  // Разбиваме бележките на части от ~600 символа (сигурен лимит за URL)
+  const CHUNK = 600;
+  const allNotes = [];
+  Object.keys(sectorNotes).forEach(sid => {
+    sectorNotes[sid].notes.forEach(n => allNotes.push(n));
+  });
+  blockNotes.forEach(n => allNotes.push(n));
+
+  const allRepeat = [];
+  const allDeadline = [];
+  Object.keys(sectorNotes).forEach(sid => {
+    sectorNotes[sid].repeat.forEach(r => allRepeat.push(r));
+    sectorNotes[sid].deadline.forEach(d => allDeadline.push(d));
+  });
+
+  if (!allNotes.length && !allRepeat.length && !allDeadline.length && !generalComment) return;
+
+  // Разбиваме в chunks по ~600 символа
+  const chunks = [];
+  let cur = [];
+  let curLen = 0;
+  allNotes.forEach(note => {
+    if (curLen + note.length + 3 > CHUNK && cur.length) {
+      chunks.push({notes: cur.join(' | '), repeat: '', deadline: '', gc: ''});
+      cur = []; curLen = 0;
+    }
+    cur.push(note);
+    curLen += note.length + 3;
+  });
+  if (cur.length || allRepeat.length || allDeadline.length || generalComment) {
+    chunks.push({
+      notes: cur.join(' | '),
+      repeat: allRepeat.join(', ').slice(0, 500),
+      deadline: allDeadline.join(' | ').slice(0, 500),
+      gc: (generalComment || '').slice(0, 400)
+    });
+  }
+
+  if (!chunks.length) return;
+  console.log('[ТеМАХ] Изпращане на бележки:', chunks.length, 'части...');
+
+  let chunkIdx = 0;
+  function sendNextChunk() {
+    if (chunkIdx >= chunks.length) {
+      console.log('[ТеМАХ] Всички бележки записани в Sheets ✅');
+      return;
+    }
+    const chunk = chunks[chunkIdx++];
+    const cb = '_notes_' + Date.now() + '_' + chunkIdx;
+    window[cb] = function(r) {
+      const sc = document.getElementById(cb);
+      if (sc) sc.remove();
+      delete window[cb];
+      setTimeout(sendNextChunk, 300);
+    };
+    const sc = document.createElement('script');
+    sc.id = cb;
+    sc.src = SHEETS_URL
+      + '?action=updateNotes'
+      + '&shop='  + encodeURIComponent(shop)
+      + '&date='  + encodeURIComponent(date)
+      + '&ts='    + encodeURIComponent(ts || '')
+      + '&chunk=' + chunkIdx
+      + (chunk.notes    ? '&notes='    + encodeURIComponent(chunk.notes)    : '')
+      + (chunk.repeat   ? '&repeat='   + encodeURIComponent(chunk.repeat)   : '')
+      + (chunk.deadline ? '&deadline=' + encodeURIComponent(chunk.deadline) : '')
+      + (chunk.gc       ? '&gc='       + encodeURIComponent(chunk.gc)       : '')
+      + '&callback=' + cb;
+    sc.onerror = function() {
+      if (sc.parentNode) sc.remove();
+      delete window[cb];
+      setTimeout(sendNextChunk, 300);
+    };
+    document.head.appendChild(sc);
+  }
+  sendNextChunk();
+}
+
 function showSyncNotification(msg, type) {
   console.log('[ТеМАХ Sync]', type, msg);
   const existing = document.getElementById('syncNotif');
@@ -1125,6 +1235,10 @@ function saveCheck() {
     } else {
       console.log('[ТеМАХ] Няма снимки за изпращане');
     }
+    // Изпращаме пълните бележки (без лимит) — след снимките
+    setTimeout(function() {
+      sendNotesToSheets(shop, date, savedTs, entry.state, entry.generalComment || '');
+    }, 2000);
 
     // Изпращаме имейл САМО след потвърждение, че данните са записани
     if (emailTo && pctVal !== null) {
