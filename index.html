@@ -1611,13 +1611,17 @@ function resendToSheets(entryTs) {
       if (r && r.status === 'ok') {
         updateEntrySyncStatus('checklist_history', entryTs, true);
         renderHistory();
-        showSyncNotification('✅ Проверката е изпратена успешно в базата!', 'success');
-        // Изпращаме и снимките (ако има), пресъздадени локално от entry.photos
+        showSyncNotification('✅ Изпратено! Бележките и снимките се синхронизират...', 'success');
+        // Снимки
         const entryPhotos = entry.photos || {};
         const photoKeys = Object.keys(entryPhotos).filter(s => entryPhotos[s] && entryPhotos[s].length);
         if (photoKeys.length) {
           sendPhotosToSheets(entry.shop, entry.date, entryPhotos);
         }
+        // Пълни бележки (updateNotes) — след 1 сек.
+        setTimeout(function() {
+          sendNotesToSheets(entry.shop, entry.date, entry.ts, entry.state, entry.generalComment || '');
+        }, 1000);
       } else {
         showSyncNotification('❌ Грешка при изпращане: ' + (r && r.message || 'Неуспешно'), 'error');
       }
@@ -1653,42 +1657,15 @@ function resendEmail(entryTs) {
     return;
   }
 
-  // Включваме пълните бележки от localStorage (без лимит)
-  // Apps Script ще ги ползва вместо съкратените от Sheets
-  const st = (entry.state) || {};
-  const fullNotesArr = [];
-  const fullRepeatArr = [];
-  const fullDeadlineArr = [];
-  SECTORS.forEach(function(sec) {
-    ['clean','labels','arrange','pallet','corridor','high'].forEach(function(gk) {
-      const key = sec.id + '_' + gk;
-      if (st.notes && st.notes[key]) fullNotesArr.push(criterionLabel(key) + ': ' + st.notes[key]);
-      if (st.repeat && st.repeat[key] === 'Y') fullRepeatArr.push(criterionLabel(key));
-      if (st.deadline && st.deadline[key]) fullDeadlineArr.push(criterionLabel(key) + ': ' + st.deadline[key]);
-    });
-    if (sec.specific) sec.specific.forEach(function(sp, i) {
-      const key = sec.id + '_' + (i+1);
-      if (st.notes && st.notes[key]) fullNotesArr.push(criterionLabel(key) + ': ' + st.notes[key]);
-      if (st.repeat && st.repeat[key] === 'Y') fullRepeatArr.push(criterionLabel(key));
-      if (st.deadline && st.deadline[key]) fullDeadlineArr.push(criterionLabel(key) + ': ' + st.deadline[key]);
-    });
-    BLOCKING.forEach(function(b, bi) {
-      const key = 'b' + (bi+1);
-      if (st.notes && st.notes[key]) fullNotesArr.push(criterionLabel(key) + ': ' + st.notes[key]);
-    });
-  });
-
+  // Apps Script чете бележките директно от Sheets (updateNotes ги е записал)
+  // URL-ът е кратък — без fullNotes в параметрите
   const emailUrl = SHEETS_URL
     + '?action=sendEmail'
-    + '&to=' + encodeURIComponent(emailTo)
-    + '&shop=' + encodeURIComponent(entry.shop)
-    + '&date=' + encodeURIComponent(entry.date)
+    + '&to='      + encodeURIComponent(emailTo)
+    + '&shop='    + encodeURIComponent(entry.shop)
+    + '&date='    + encodeURIComponent(entry.date)
     + '&manager=' + encodeURIComponent(entry.manager || '')
-    + '&ts=' + encodeURIComponent(entry.ts || '')
-    + (fullNotesArr.length ? '&fullNotes=' + encodeURIComponent(fullNotesArr.join(' | ').slice(0, 2000)) : '')
-    + (fullRepeatArr.length ? '&fullRepeat=' + encodeURIComponent(fullRepeatArr.join(', ').slice(0, 500)) : '')
-    + (fullDeadlineArr.length ? '&fullDeadline=' + encodeURIComponent(fullDeadlineArr.join(' | ').slice(0, 500)) : '')
-    + (entry.generalComment ? '&generalComment=' + encodeURIComponent(entry.generalComment.slice(0, 400)) : '');
+    + '&ts='      + encodeURIComponent(entry.ts || '');
 
   showSyncNotification('⏳ Изпращане на имейл...', 'warning');
   sendEmailWithRetry(emailUrl, emailTo, 1);
