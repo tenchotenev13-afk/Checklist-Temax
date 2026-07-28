@@ -248,86 +248,199 @@ function loadMyShops() {
 
 function configureMyShops() {
   const current = loadMyShops();
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
-
-  let shops = [...current];
-
-  function renderOverlay() {
-    overlay.innerHTML = '';
-    const box = document.createElement('div');
-    box.style.cssText = 'background:#fff;border-radius:14px;padding:20px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)';
-    box.innerHTML = '<div style="font-size:16px;font-weight:700;color:#0D1B2A;margin-bottom:4px">⚙️ Моите магазини</div>' +
-      '<div style="font-size:12px;color:#64748B;margin-bottom:16px">Добавете магазините, за които отговаряте.</div>';
-
-    // Tags
-    const list = document.createElement('div');
-    list.style.cssText = 'margin-bottom:14px;display:flex;flex-wrap:wrap;gap:8px;min-height:36px';
-    if (shops.length) {
-      shops.forEach(function(s, i) {
-        const tag = document.createElement('span');
-        tag.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:#EDF2FF;border-radius:20px;font-size:13px;color:#3B5BDB;font-weight:600';
-        tag.textContent = s;
-        const x = document.createElement('button');
-        x.textContent = '×';
-        x.style.cssText = 'background:none;border:none;color:#3B5BDB;cursor:pointer;font-size:16px;padding:0;line-height:1;margin-left:2px';
-        x.setAttribute('data-idx', i);
-        x.onclick = function() { shops.splice(parseInt(this.getAttribute('data-idx')), 1); renderOverlay(); };
-        tag.appendChild(x);
-        list.appendChild(tag);
-      });
-    } else {
-      list.innerHTML = '<span style="color:#94A3B8;font-size:12px;font-style:italic">Няма добавени магазини</span>';
-    }
-    box.appendChild(list);
-
-    // Input row
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:8px;margin-bottom:16px';
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.placeholder = 'Наименование на магазин...';
-    inp.style.cssText = 'flex:1;padding:9px 12px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;outline:none';
-    const addBtn = document.createElement('button');
-    addBtn.textContent = '+ Добави';
-    addBtn.style.cssText = 'padding:9px 14px;background:#3B5BDB;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer';
-    addBtn.onclick = function() {
-      const val = inp.value.trim();
-      if (!val) return;
-      if (!shops.map(function(s){return s.toLowerCase();}).includes(val.toLowerCase())) shops.push(val);
-      inp.value = '';
-      renderOverlay();
-      setTimeout(function(){ overlay.querySelector('input').focus(); }, 50);
-    };
-    inp.addEventListener('keydown', function(e){ if (e.key==='Enter') addBtn.onclick(); });
-    row.appendChild(inp); row.appendChild(addBtn);
-    box.appendChild(row);
-
-    // Action buttons
-    const btns = document.createElement('div');
-    btns.style.cssText = 'display:flex;gap:10px;justify-content:flex-end';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = 'Отказ';
-    cancelBtn.style.cssText = 'padding:9px 18px;background:#F1F5F9;color:#374151;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer';
-    cancelBtn.onclick = function(){ document.body.removeChild(overlay); };
-    const saveBtn = document.createElement('button');
-    saveBtn.textContent = '✅ Запази';
-    saveBtn.style.cssText = 'padding:9px 18px;background:#0A7C59;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer';
-    saveBtn.onclick = function(){
-      localStorage.setItem('temax_my_shops', JSON.stringify(shops));
-      document.body.removeChild(overlay);
-      showSyncNotification(shops.length ? '✅ Записани: ' + shops.join(', ') : '⚠️ Няма зададени магазини', shops.length ? 'success' : 'warning');
-      renderHistory();
-    };
-    btns.appendChild(cancelBtn); btns.appendChild(saveBtn);
-    box.appendChild(btns);
-    overlay.appendChild(box);
-  }
-
-  renderOverlay();
-  document.body.appendChild(overlay);
-  setTimeout(function(){ const i = overlay.querySelector('input'); if(i) i.focus(); }, 100);
+  const input = prompt(
+    'Кои магазини следите?\nВъведете имената, разделени със запетая.\n(Точно както ги въвеждате в полето "Магазин")',
+    current.join(', ')
+  );
+  if (input === null) return; // Cancel
+  const shops = input.split(',').map(s => s.trim()).filter(Boolean);
+  localStorage.setItem('temax_my_shops', JSON.stringify(shops));
+  showSyncNotification(shops.length ? '✅ Записани магазини: ' + shops.join(', ') : '⚠️ Няма зададени магазини', shops.length ? 'success' : 'warning');
+  renderHistory();
 }
+
+
+
+// ═══════════════════════════════════════════════════════════
+// ДАННИ — съответстват точно на Excel файла
+// ═══════════════════════════════════════════════════════════
+
+// Блокиращи критерии (от Лист 2, точни текстове)
+const BLOCKING = [
+  { id:'b1', text:'Касови продажби. При под 30% от средния брой касови продажби от справката в Т-бюлетина — бонусът отпада.' },
+  { id:'b2', text:'Проверка на всички цели палета (неотворени сухи смеси за вече изтекъл срок)' },
+  { id:'b3', text:'Всички в магазина с униформи и баджове ли са? + проверка от камери' },
+  { id:'b4', text:'Изрядна документация на обекта и пожарогасители в срок на годност' },
+];
+
+// Общи критерии — Лист 1, колони C–H (max 1 точка всеки)
+// Важно: за сектори 13, 14, 15 са приложими САМО 'clean' (останалите са пред-зададени Н/П)
+const GENERAL_CRITERIA = [
+  { key:'clean',    label:'Чистота & ред — Прах и чистота на пода, стелажите и стоката; Празни опаковки и картони по земята' },
+  { key:'labels',   label:'Етикиране — Налични всички ценови етикети (стандартни + промо); Премахнати стари изтекли промоции' },
+  { key:'arrange',  label:'Подредба & изложба — Стока по земята без палет с подходящ размер; Хоризонтал/блок; Стока зад друга без лице; Запълненост на рафтовете' },
+  { key:'pallet',   label:'Палетна зона — Височина на палетозоната; Отстояния за преминаване — 2×2/4×4' },
+  { key:'corridor', label:'Коридори и визия — Мин. 80см отстояние от двете страни на палет в коридор; В равни форми без излизане на стока' },
+  { key:'high',     label:'Висока зона — Надписана с арт.№ и наименование; Пълна и подредена' },
+];
+
+// Сектори — специфични критерии точно от Лист 2
+// generalApply: само тези общи критерии са приложими (за s13, s14, s15)
+const SECTORS = [
+  { id:'s1', name:'1. Плочки и ламинат', color:'#3B5BDB',
+    specific:[
+      { id:'s1_1', stars:2, text:'★★ Нареждане по планограма от ЦО или максимална близост при липса' },
+      { id:'s1_2', stars:2, text:'★★ Стена с всички модели 120×60 / 60×60 — изложена и пълна' },
+      { id:'s1_3', stars:2, text:'★★ Има ли неизложени модели плочки' },
+      { id:'s1_4', stars:1, text:'Палети под стелажа — подредени правилно' },
+      { id:'s1_5', stars:1, text:'Правилно етикиране с ламинирани етикети и без липса' },
+    ]}, // spec max: 2+2+2+1+1 = 8
+  { id:'s2', name:'2. Строителство', color:'#0CA678',
+    specific:[
+      { id:'s2_1', stars:2, text:'★★ Нареждане по планограма или максимална близост при липса' },
+      { id:'s2_2', stars:1, text:'Подредба по приложение: покрив и отичане / изолация / гипскартон и шпакловане и т.н.' },
+      { id:'s2_3', stars:1, text:'Палетолинията в логическа последователност на материалите по група на продукт' },
+      { id:'s2_4', stars:1, text:'Налични видими мостри с цени на всички неизложени продукти' },
+    ]}, // spec max: 2+1+1+1 = 5
+  { id:'s3', name:'3. Баня и ВиК', color:'#0C8599',
+    specific:[
+      { id:'s3_1', stars:2, text:'★★ Нареждане по планограма или максимална близост при липса' },
+      { id:'s3_2', stars:1, text:'Изложени всички най-нови мостри душ кабини и паравани; последните бройки намалени на червен етикет' },
+      { id:'s3_3', stars:1, text:'Всички окачени чинии монтирани към структури за вграждане' },
+      { id:'s3_4', stars:1, text:'Няма неокачени мебели за баня и огледала (празни дупки)' },
+      { id:'s3_5', stars:1, text:'Мебелите за баня разделени на стенни и стоящи' },
+      { id:'s3_6', stars:1, text:'Смесителите подредени по вид и дължина на чучура (при липса на планограма)' },
+      { id:'s3_7', stars:1, text:'Всички душове, хидромасажи и смесители за вграждане монтирани и изложени мостри' },
+    ]}, // spec max: 2+1+1+1+1+1+1 = 8
+  { id:'s4', name:'4. Текстил', color:'#7048E8',
+    specific:[
+      { id:'s4_1', stars:2, text:'★★ Нареждане по планограма или изисквания на ЦО при липса' },
+    ]}, // spec max: 2
+  { id:'s5', name:'5. Подови настилки и килими', color:'#1971C2',
+    specific:[
+      { id:'s5_1', stars:2, text:'★★ Нареждане по планограма или максимална близост при липса' },
+      { id:'s5_2', stars:1, text:'Празни шпули на стойките → изпратени необходими бройки към ЦО' },
+      { id:'s5_3', stars:1, text:'Килимите по планограма в мостреника' },
+      { id:'s5_4', stars:1, text:'Килими на маси / палети подредени по размер и вид (планограма при наличие)' },
+    ]}, // spec max: 2+1+1+1 = 5
+  { id:'s6', name:'6. Домашни потреби', color:'#E67700',
+    specific:[
+      { id:'s6_1', stars:2, text:'★★ Нареждане по планограма или максимална близост при по-голяма номенклатура' },
+      { id:'s6_2', stars:1, text:'Логическо подреждане на клетките при липса на планограма (готвене/сервиране/почистване/пране и т.н.)' },
+    ]}, // spec max: 2+1 = 3
+  { id:'s7', name:'7. Бои и облицовки', color:'#C2255C',
+    note:'(ако облицовките са в сектор плочки — пак се попълва тук)',
+    specific:[
+      { id:'s7_1', stars:2, text:'★★ Нареждане по планограма или максимална близост при липса' },
+      { id:'s7_2', stars:1, text:'Всички мострени ПВЦ пана — едно до друго в цял размер' },
+      { id:'s7_3', stars:1, text:'Стоки на палет — подредени по вид и логика с цена, не нахвърляни' },
+      { id:'s7_4', stars:1, text:'Машини за тониране — почистени и презентирани с картели (при наличие на машини)' },
+    ]}, // spec max: 2+1+1+1 = 5
+  { id:'s8', name:'8. Ел. и градински машини', color:'#2F9E44',
+    specific:[
+      { id:'s8_1', stars:2, text:'★★ Нареждане по планограма или насоки от ЦО при липса — спазени' },
+      { id:'s8_2', stars:1, text:'Сглобени мостри на всички продукти (косачки, мотофрези, ремаркета, триони, тримери и коси, помпи, водоструйки, генератори) — проверка по наличност' },
+    ]}, // spec max: 2+1 = 3
+  { id:'s9', name:'9. Градина', color:'#5C940D',
+    specific:[
+      { id:'s9_1', stars:2, text:'★★ Нареждане по планограма или насоки от ЦО при наличие' },
+      { id:'s9_2', stars:1, text:'Изложена сезонна стока спрямо изискванията от ЦО за сметка на несезонна стока (ако няма подадена през Т-бюлетин — Н/П)' },
+      { id:'s9_3', stars:1, text:'Сезонни продукти — правилно обозначени и позиционирани' },
+    ]}, // spec max: 2+1+1 = 4
+  { id:'s10', name:'10. Градински мебели', color:'#6741D9',
+    specific:[
+      { id:'s10_1', stars:2, text:'★★ Септ–Апр: инфотабели на всички неизложени градински мебели — проверка по наличност' },
+      { id:'s10_2', stars:2, text:'★★ Апр–Септ: всички модели изложени по минимум 1 + инфотабели с цветове (мебели, люлки, чадъри, шатри, къмпинг, палатки) — проверка по наличност в системата' },
+      { id:'s10_3', stars:2, text:'★★ Целогодишно: всички модели барбекю изложени по наличност в система' },
+    ]}, // spec max: 2+2+2 = 6
+  { id:'s11', name:'11. Крепежи, обков и врати', color:'#0C8599',
+    specific:[
+      { id:'s11_1', stars:2, text:'★★ Нареждане по планограма или максимална близост при липса' },
+      { id:'s11_2', stars:1, text:'Врати на стойки — добро етикиране, подредени в добра линия' },
+      { id:'s11_3', stars:1, text:'Крепежи и обков — наредени по вид и размер, без смесване + КАМ' },
+    ]}, // spec max: 2+1+1 = 4
+  { id:'s12', name:'12. Входна зона и фасада', color:'#1864AB',
+    specific:[
+      { id:'s12_1', stars:1, text:'Актуална сезонна изложба в предверието (без предверие → Н/П)' },
+      { id:'s12_2', stars:1, text:'Добре подредени актуални продукти отвън' },
+      { id:'s12_3', stars:1, text:'Информационно табло — актуално, добре изглеждащи табели, запълнено' },
+      { id:'s12_4', stars:1, text:'Палетни точки — адекватни отстояния / височина, инфо табели, актуална стока' },
+    ]}, // spec max: 1+1+1+1 = 4
+  { id:'s13', name:'13. Вътрешен склад', color:'#495057',
+    generalApply: ['clean'], // САМО Чистота & ред — останалите 5 са Н/П (Лист 1, ред 13)
+    specific:[
+      { id:'s13_1', stars:1, text:'Складът зониран по вид стока без смесване на сектори — с табели (зониран)' },
+      { id:'s13_2', stars:1, text:'Затисната стока зад по-едра на едно ниво — проверено и коригирано' },
+      { id:'s13_3', stars:1, text:'Всичко надписано (артикулни номера, наименования), надписите / етикетите видими' },
+      { id:'s13_4', stars:1, text:'Зона: стока за други обекти — обозначена и отделена' },
+      { id:'s13_5', stars:1, text:'Зона: неприета стока за прием — обозначена и отделена' },
+      { id:'s13_6', stars:1, text:'Зона: приета стока за подреждане в склад или ТЗ — обозначена' },
+      { id:'s13_7', stars:1, text:'Зона: стоки за връщане — обозначена и отделена' },
+      { id:'s13_8', stars:1, text:'Зона: стоки за брак или преоценка — обозначена и отделена' },
+      { id:'s13_9', stars:1, text:'Адресиране на локации — маркирани и четливи' },
+    ]}, // spec max: 9 (8 по формулата в Excel — разминаване в Excel файла)
+  { id:'s14', name:'14. Външен склад', color:'#343A40',
+    generalApply: ['clean'], // САМО Чистота & ред (Лист 1, ред 14)
+    specific:[
+      { id:'s14_1', stars:1, text:'Складът зониран по вид стока без смесване на сектори — с табели (зониран)' },
+      { id:'s14_2', stars:1, text:'Затисната стока зад по-едра на едно ниво — проверено и коригирано' },
+      { id:'s14_3', stars:1, text:'Всичко надписано (артикулни номера, наименования), надписите / етикетите видими' },
+      { id:'s14_4', stars:1, text:'Зона: стока за други обекти — обозначена и отделена' },
+      { id:'s14_5', stars:1, text:'Зона: неприета стока за прием — обозначена и отделена' },
+      { id:'s14_6', stars:1, text:'Зона: приета стока за подреждане в склад или ТЗ — обозначена' },
+      { id:'s14_7', stars:1, text:'Зона: стоки за връщане — обозначена и отделена' },
+      { id:'s14_8', stars:1, text:'Зона: стоки за брак или преоценка — обозначена и отделена' },
+      { id:'s14_9', stars:1, text:'Адресиране на локации — маркирани и четливи' },
+    ]}, // spec max: 9
+  { id:'s15', name:'15. Плац', color:'#2B8A3E',
+    generalApply: ['clean'], // САМО Чистота & ред (Лист 1, ред 15)
+    specific:[
+      { id:'s15_1', stars:1, text:'Постоянни: плочките на плац задължително покрити с найлони' },
+      { id:'s15_2', stars:1, text:'Постоянни: сухи смеси само на фабрично запечатани палети' },
+      { id:'s15_3', stars:1, text:'Постоянни: сухи смеси и гипскартон отворени — само под навес и покрити с найлон' },
+      { id:'s15_4', stars:1, text:'Временни (сезонни, ПВЦ и др.): задължително покрити с найлони' },
+    ]}, // spec max: 1+1+1+1 = 4
+  { id:'s16', name:'16. Касова зона и бюра', color:'#9C36B5',
+    specific:[
+      { id:'s16_1', stars:1, text:'Чистота и подреденост на касите и бюрата' },
+      { id:'s16_2', stars:1, text:'Бюро информация — подредено, забърсано без събрани рекламации и стока за транспорт' },
+      { id:'s16_3', stars:1, text:'Палетолинии — правилни отстояния 2×2 или 4×4 по стандарт + височина' },
+      { id:'s16_4', stars:1, text:'Задължителни палетни точки с консумативи при касите (мокри кърпи, тоалетна хартия, кухненска ролка и др.)' },
+      { id:'s16_5', stars:1, text:'Етикираност на изложената стока в касовата зона' },
+      { id:'s16_6', stars:1, text:'Без тикса, етикети и консумативи върху бюрата на консултанти' },
+      { id:'s16_7', stars:3, text:'★★★ Храни, напитки или дрехи върху бюрата на консултанти' },
+      { id:'s16_8', stars:1, text:'Има ли музика в обекта от радиото на ТеМАХ?' },
+    ]}, // spec max: 1+1+1+1+1+1+3+1 = 10
+  { id:'s17', name:'17. Осветление', color:'#E67700',
+    specific:[
+      { id:'s17_1', stars:2, text:'★★ Подредба по планограма или максимална близост при липса' },
+      { id:'s17_2', stars:1, text:'Всички осветителни тела подредени по вид, серия и цвят' },
+      { id:'s17_3', stars:1, text:'Мостри на ЛЕД плафони и ЛЕД полюлеи — окабелени и в работно състояние' },
+    ]}, // spec max: 2+1+1 = 4
+];
+
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let state = { blocking:{}, general:{}, specific:{}, notes:{}, repeat:{}, deadline:{}, photos:{} };
+
+// ═══════════════════════════════════════════════════════════
+// SCORING — съответства точно на Excel формулите
+//
+// Лист 1: genPct = SUM(non-NP gen scores) / COUNT(applicable non-NP criteria)
+//          Пред-зададените Н/П (s13/s14/s15 критерии 2-6) не участват изобщо
+//          Непопълнен критерий = 0 в числителя, 1 в знаменателя (Excel поведение)
+//
+// Лист 2: specPct = SUM(non-NP spec scores) / SUM(non-NP spec max)
+//          Непопълнен критерий = 0 в числителя, max в знаменателя
+//
+// Лист 3: sectorPct = IFERROR(IF(specPct="Н/П", genPct, AVERAGE(genPct, specPct)), genPct)
+//          = AVERAGE(genPct, specPct) ако и двата са налични
+//          = genPct ако spec е Н/П
+//
+// Обща оценка (Лист 3): = AVERAGE(всичките 17 сектора)
+// ═══════════════════════════════════════════════════════════
+
 function getSectorScore(sector) {
   // Определяме кои общи критерии са приложими за сектора
   const applicableKeys = sector.generalApply || GENERAL_CRITERIA.map(gc => gc.key);
@@ -806,12 +919,9 @@ function checkDraft() {
       }
       if (draft.state) {
         Object.assign(state, draft.state);
-        buildCheckUI(); // rebuild sectors with saved state
+        renderAll && renderAll();
       }
-      // Превключваме към таб Проверка — важно за мобилни устройства
-      switchView('check');
-      window.scrollTo({top: 0, behavior: 'smooth'});
-      showSyncNotification('📋 Черновата е възстановена — продължете с попълването!', 'success');
+      showSyncNotification('✅ Черновата е възстановена.', 'success');
     } else {
       clearDraft();
     }
@@ -1024,28 +1134,7 @@ function saveCheck() {
   const shop = document.getElementById('shopName').value.trim();
   const date = document.getElementById('checkDate').value;
   const manager = document.getElementById('managerName').value.trim();
-  // Задължителни полета
-  if (!shop) {
-    alert('⚠️ Моля, въведете името на магазина преди да запазите.');
-    document.getElementById('shopName').focus();
-    return;
-  }
-  if (!date) {
-    alert('⚠️ Моля, изберете дата на проверката.');
-    document.getElementById('checkDate').focus();
-    return;
-  }
-
-  // Препоръчителни полета — предупреждение без блокиране
-  if (!manager) {
-    const ok = confirm('⚠️ Не е въведено име на управителя.\nЖелаете ли да продължите без него?');
-    if (!ok) { document.getElementById('managerName').focus(); return; }
-  }
-  const emailVal = (document.getElementById('reportEmail') || {}).value || '';
-  if (!emailVal.trim()) {
-    const ok = confirm('📧 Не е въведен имейл адрес.\nОтчетът НЯМА да бъде изпратен автоматично.\n\nЖелаете ли да продължите без имейл?');
-    if (!ok) { document.getElementById('reportEmail').focus(); return; }
-  }
+  if (!shop || !date) { alert('Моля, попълнете магазин и дата преди да запазите.'); return; }
 
   // Предупреждение ако все още се качват снимки
   if (pendingUploads > 0) {
@@ -1735,34 +1824,17 @@ function loadSheetsHistorySection(localHistory) {
     // localTimestamps — за избягване на дублиране (записи вече показани локално)
     const localTs = new Set(localHistory.map(e => e.ts).filter(Boolean));
 
-    const myShopsLower = myShops.map(s => s.toLowerCase().trim());
     const sheetsEntries = json.data.filter(d =>
-      myShopsLower.includes(String(d.shop || '').toLowerCase().trim()) &&
+      myShops.includes(String(d.shop || '').trim()) &&
       !localTs.has(d.savedAt)
     );
 
-    // Диагностика
-    const allShopsInSheets = [...new Set(json.data.map(d => d.shop).filter(Boolean))];
-    const matchCount = sheetsEntries.length;
-    console.log('[История] Общо записи в Sheets:', json.data.length);
-    console.log('[История] Магазини в Sheets:', allShopsInSheets);
-    console.log('[История] Моите магазини:', myShopsLower);
-    console.log('[История] Намерени:', matchCount);
-
-  if (!matchCount) {
-    const hint = allShopsInSheets.length
-      ? '⚠️ Няма проверки за: ' + myShops.join(', ') + '. В базата има: ' + allShopsInSheets.join(', ') + '. Проверете дали имената съвпадат точно (⚙️ Моите магазини).'
-      : '⚠️ Базата е празна или недостъпна.';
-    if (banner) {
-      banner.style.background = '#FEF3C7';
-      banner.style.borderColor = '#FCD34D';
-      banner.style.color = '#B45309';
-      banner.innerHTML = hint;
+    if (!sheetsEntries.length) {
+      if (banner) banner.innerHTML = '✅ Няма допълнителни проверки от други устройства за: ' + myShops.join(', ');
+      const old = document.getElementById('sheetsHistoryContent');
+      if (old) old.remove();
+      return;
     }
-    const old = document.getElementById('sheetsHistoryContent');
-    if (old) old.remove();
-    return;
-  }
 
     sheetsEntries.sort((a, b) => String(b.savedAt||'').localeCompare(String(a.savedAt||'')));
 
