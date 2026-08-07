@@ -457,68 +457,98 @@ function renderTab(name){
 
 function renderOverview(){
   if(!filtered.length){document.getElementById('tabContent').innerHTML='<p class="empty">Няма данни за избраните филтри.</p>';return;}
-  const total=filtered.length;
-  const bonus=filtered.filter(d=>d.bonusOk).length;
-  const fSec=document.getElementById('fSector').value;
-  // При избран сектор — показваме оценката за него, не общата
-  const avg=filtered.filter(d=>{
-    if(fSec) return d.sectors && d.sectors[fSec]!==null && d.sectors[fSec]!==undefined;
-    return d.overallPct!==null;
-  });
-  const avgPct=avg.length?Math.round(avg.reduce((a,d)=>fSec?a+d.sectors[fSec]:a+d.overallPct,0)/avg.length):null;
-  const blocks=filtered.filter(d=>d.blockFail).length;
-  const shops=[...new Set(filtered.map(d=>d.shop))].length;
 
-  const shopMap={};
-  filtered.forEach(d=>{
-    // Сравняваме по пълен savedAt timestamp (не само дата), за коректност при няколко проверки в един ден
-    const cur = shopMap[d.shop];
-    if (!cur || String(d.savedAt||d.date||'') > String(cur.savedAt||cur.date||'')) shopMap[d.shop]=d;
-  });
-  const ranked=Object.values(shopMap).sort((a,b)=>(b.overallPct||0)-(a.overallPct||0));
+  const total  = filtered.length;
+  const bonus  = filtered.filter(d=>d.bonusOk).length;
+  const blocks = filtered.filter(d=>d.blockFail).length;
+  const fSec   = document.getElementById('fSector').value;
 
-  const ok_class=avgPct===null?'info':avgPct>=85?'ok':avgPct>=60?'warn':'bad';
-  const avgLabel=fSec?'Среден '+SEC_NAMES[fSec]:'Средна оценка';
-  const avgSub=fSec?'сектор '+SEC_NAMES[fSec]:'на всички сектори';
-  let h='<div class="kpi-row">'
-    +kpiCard('Проверки',total,filtered.length+' записа','info')
-    +kpiCard('Магазини',shops,'уникални обекта','info')
-    +kpiCard(avgLabel,avgPct!==null?avgPct+'%':'—',avgSub,ok_class)
-    +kpiCard('Бонус',bonus+'/'+total,Math.round(bonus/total*100)+'% одобрени',bonus===total?'ok':'warn')
+  // Средна обща оценка за периода
+  const withPct = filtered.filter(d=>d.overallPct!==null && d.overallPct!==undefined);
+  const avgPct  = withPct.length ? Math.round(withPct.reduce((a,d)=>a+d.overallPct,0)/withPct.length) : null;
+  const ok_class = avgPct===null?'info':avgPct>=85?'ok':avgPct>=60?'warn':'bad';
+  const shops = [...new Set(filtered.map(d=>d.shop))].length;
+
+  // KPI cards
+  let h = '<div class="kpi-row">'
+    +kpiCard('Проверки', total, total+' за периода', 'info')
+    +kpiCard('Магазини', shops, 'уникални обекта', 'info')
+    +kpiCard('Средна оценка', avgPct!==null?avgPct+'%':'—', 'за целия период', ok_class)
+    +kpiCard('Бонус', bonus+'/'+total, Math.round(bonus/total*100)+'% одобрени', bonus===total?'ok':'warn')
     +'</div>';
 
-  if(blocks) h+='<div style="background:var(--red-l);border:1px solid #FECACA;border-radius:var(--r);padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--red);font-weight:600">⛔ '+blocks+' проверки с блокиращ критерий</div>';
-  // Секторна лента при избран сектор
-  if(fSec){
-    const secData=filtered.map(d=>({shop:d.shop,date:d.date,pct:d.sectors&&d.sectors[fSec]!==null?d.sectors[fSec]:null})).filter(d=>d.pct!==null);
-    const belowThreshold=secData.filter(d=>d.pct<85).length;
-    h+='<div style="background:var(--indigo-l);border:1px solid #C5D4FB;border-radius:var(--r);padding:10px 14px;margin-bottom:12px">'
-      +'<div style="font-size:11px;font-weight:700;color:var(--indigo);margin-bottom:6px">🔍 Избран сектор: '+SEC_NAMES[fSec]+'</div>'
-      +'<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px">'
-      +'<span>Средна оценка: <b style="color:'+pctColor(avgPct)+'">'+( avgPct!==null?avgPct+'%':'—')+'</b></span>'
-      +'<span>Под 85%: <b style="color:var(--red)">'+belowThreshold+' магазина</b></span>'
-      +'<span>С данни: <b>'+secData.length+'</b></span>'
-      +'</div></div>';
+  // Блокиращо предупреждение
+  if(blocks){
+    h+='<div style="background:var(--red-l);border:1px solid #FECACA;border-radius:var(--r);padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--red);font-weight:600">⛔ '+blocks+' проверки с блокиращ критерий — бонусът отпада автоматично</div>';
   }
 
-  h+='<div class="section-title">Класация по последна проверка</div><div class="card"><div class="card-hdr">Магазини — последен резултат</div>';
-  ranked.forEach((d,i)=>{
-    const p=d.overallPct;
-    const cc=p===null?'':p>=85?'row-ok':p>=60?'row-warn':'row-bad';
-    const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1)+'.';
-    const bg=cc==='row-ok'?'background:#F0FDF9':cc==='row-warn'?'background:#FFFBEB':cc==='row-bad'?'background:#FFF5F5':'';
-    h+='<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-top:1px solid var(--slate-l);'+bg+'">'
-      +'<span style="font-size:14px;width:28px;flex-shrink:0">'+medal+'</span>'
-      +'<span style="flex:1;font-size:13px;font-weight:600">'+d.shop+'</span>'
-      +'<span style="font-size:10px;color:var(--slate)">'+fmtDate(d.date)+'</span>'
-      +'<span class="td-mono" style="min-width:44px;text-align:right;color:'+pctColor(p)+'">'+( p!==null?p+'%':'—')+'</span>'
-      +'<span class="td-badge '+(d.bonusOk?'b-ok':'b-no')+'">'+( d.bonusOk?'✅':'✗')+'</span>'
-      +'<button data-shop="'+String(d.shop||'').replace(/"/g,'&quot;')+'" data-date="'+String(d.date||'')+'" data-savedat="'+String(d.savedAt||'').replace(/"/g,'&quot;')+'" onclick="printByShopDate(this.dataset.shop,this.dataset.date,this.dataset.savedat)" style="padding:6px 14px;background:var(--indigo);border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">📄 PDF</button>'
-      +'</div>';
+  // Групираме по магазин
+  const shopGroups = {};
+  filtered.forEach(d=>{
+    if(!shopGroups[d.shop]) shopGroups[d.shop]=[];
+    shopGroups[d.shop].push(d);
   });
-  h+='</div>';
+
+  // Сортираме магазините по средна оценка (низходящо)
+  const shopNames = Object.keys(shopGroups).sort((a,b)=>{
+    const avgA = shopGroups[a].filter(d=>d.overallPct!==null).reduce((s,d)=>s+d.overallPct,0) / (shopGroups[a].filter(d=>d.overallPct!==null).length||1);
+    const avgB = shopGroups[b].filter(d=>d.overallPct!==null).reduce((s,d)=>s+d.overallPct,0) / (shopGroups[b].filter(d=>d.overallPct!==null).length||1);
+    return avgB - avgA;
+  });
+
+  h += '<div class="section-title">Проверки по магазин</div>';
+
+  shopNames.forEach((shop, si)=>{
+    const entries = shopGroups[shop].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+    const shopWithPct = entries.filter(d=>d.overallPct!==null);
+    const shopAvg = shopWithPct.length ? Math.round(shopWithPct.reduce((s,d)=>s+d.overallPct,0)/shopWithPct.length) : null;
+    const shopBonus = entries.filter(d=>d.bonusOk).length;
+    const shopBlocks = entries.filter(d=>d.blockFail).length;
+    const medal = si===0?'🥇':si===1?'🥈':si===2?'🥉':'';
+    const headerBg = shopBlocks>0 ? 'background:#FFF5F5;border-color:#FECACA' : shopAvg>=85?'background:#F0FDF9;border-color:#A7F3D0':shopAvg>=60?'background:#FFFBEB;border-color:#FDE68A':'background:#FFF5F5;border-color:#FECACA';
+
+    h += '<div class="card" style="margin-bottom:14px;overflow:hidden">';
+
+    // Хедър на магазина
+    h += '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--slate-l);'+headerBg+'">';
+    h += '<span style="font-size:16px">'+medal+'</span>';
+    h += '<span style="flex:1;font-size:14px;font-weight:700;color:#0D1B2A">'+shop+'</span>';
+
+    // Средна оценка за магазина
+    if(shopAvg!==null){
+      h += '<div style="text-align:center;margin-right:8px"><div style="font-size:10px;color:#64748B;text-transform:uppercase;letter-spacing:.04em">Средна</div><div style="font-size:18px;font-weight:800;color:'+pctColor(shopAvg)+'">'+shopAvg+'%</div></div>';
+    }
+    // Бонус статистика
+    h += '<div style="text-align:center;margin-right:8px"><div style="font-size:10px;color:#64748B;text-transform:uppercase;letter-spacing:.04em">Бонус</div><div style="font-size:13px;font-weight:700;color:'+(shopBonus===entries.length?'var(--green)':'var(--red)')+'">'+shopBonus+'/'+entries.length+'</div></div>';
+    // Блокиращ
+    if(shopBlocks>0){
+      h += '<div style="background:var(--red);color:#fff;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700">⛔ '+shopBlocks+' блокиращ</div>';
+    }
+    h += '</div>';
+
+    // Всички проверки за магазина
+    entries.forEach(d=>{
+      const p = fSec ? (d.sectors&&d.sectors[fSec]!==null?d.sectors[fSec]:null) : d.overallPct;
+      const rowBg = d.blockFail?'background:#FFF5F5':p===null?'':p>=85?'background:#F9FEFB':p>=60?'background:#FFFDF4':'background:#FFF8F8';
+      h += '<div style="display:flex;align-items:center;gap:8px;padding:9px 16px;border-top:1px solid var(--slate-l);'+rowBg+'">';
+      h += '<span style="font-size:12px;color:#64748B;min-width:90px">'+fmtDate(d.date)+'</span>';
+      h += '<span style="font-size:11px;color:#94A3B8;flex:1">'+(d.manager||'—')+'</span>';
+      // Блокиращ бадж
+      if(d.blockFail){
+        h += '<span style="background:var(--red);color:#fff;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;margin-right:4px">⛔ БЛОК</span>';
+      }
+      h += '<span class="td-mono" style="min-width:44px;text-align:right;color:'+pctColor(p)+'">'+( p!==null?p+'%':'—')+'</span>';
+      h += '<span class="td-badge '+(d.bonusOk?'b-ok':'b-no')+'" style="margin-left:4px">'+( d.bonusOk?'✅':'✗')+'</span>';
+      h += '<button data-shop="'+String(d.shop||'').replace(/"/g,'&quot;')+'" data-date="'+String(d.date||'')+'" data-savedat="'+String(d.savedAt||'').replace(/"/g,'&quot;')+'" onclick="printByShopDate(this.dataset.shop,this.dataset.date,this.dataset.savedat)" style="padding:4px 10px;background:var(--indigo);border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:700;cursor:pointer;margin-left:6px;flex-shrink:0">📄 PDF</button>';
+      h += '</div>';
+    });
+
+    h += '</div>';
+  });
+
   document.getElementById('tabContent').innerHTML=h;
 }
+
 
 function kpiCard(lbl,val,sub,cls){return'<div class="kpi '+cls+'"><div class="kpi-lbl">'+lbl+'</div><div class="kpi-val">'+val+'</div><div class="kpi-sub">'+sub+'</div></div>';}
 
