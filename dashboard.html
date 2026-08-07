@@ -318,7 +318,7 @@ function printDashboardEntry(idx) {
           var name = SEC_NAMES[sid] || sid;
           ph += '<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">' + name + '</div>';
           ph += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
-          d.photos[sid].forEach(function(url){
+          (Array.isArray(d.photos[sid])?d.photos[sid]:[]).forEach(function(url){
             ph += '<img src="' + url + '" style="width:140px;height:105px;object-fit:cover;border-radius:4px;border:1px solid #E2E8F0">';
           });
           ph += '</div></div>';
@@ -573,12 +573,12 @@ function renderOverview(){
 
       // Снимки
       if(d.photos && Object.keys(d.photos).length){
-        const photoSids = Object.keys(d.photos).filter(function(sid){ return d.photos[sid]&&d.photos[sid].length; });
+        const photoSids = Object.keys(d.photos).filter(function(sid){ return Array.isArray(d.photos[sid])&&d.photos[sid].length; });
         if(photoSids.length){
           h += '<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">📷 Снимки</div>';
           h += '<div style="display:flex;flex-wrap:wrap;gap:8px">';
           photoSids.forEach(function(sid){
-            d.photos[sid].forEach(function(url){
+            (Array.isArray(d.photos[sid])?d.photos[sid]:[]).forEach(function(url){
               const galleryUrls = d.photos[sid].join('|||').replace(/'/g,"\'");
               h += '<img src="'+url+'" onclick="event.stopPropagation();showPhotoGallery(this.dataset.urls, this.dataset.sid)" data-urls="'+d.photos[sid].join('|||')+'" data-sid="'+sid+'" style="width:100px;height:75px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid #E2E8F0">';
             });
