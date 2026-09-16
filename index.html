@@ -52,6 +52,7 @@ body{font-family:'IBM Plex Sans',sans-serif;background:#F1F3F5;color:var(--text)
 .score-btn.s05.active{background:var(--amber);border-color:var(--amber);color:#fff}
 .score-btn.s0.active{background:var(--rose);border-color:var(--rose);color:#fff}
 .score-btn.snp.active{background:var(--slate);border-color:var(--slate);color:#fff}
+.score-btn.snp-report{flex:1.7;font-size:11px;letter-spacing:-.01em;padding:10px 4px}
 .score-btn.sda.active{background:var(--emerald);border-color:var(--emerald);color:#fff}
 .score-btn.sne.active{background:var(--red-b);border-color:var(--red-b);color:#fff}
 .np-badge{display:inline-block;padding:6px 14px;background:var(--slate-l);border-radius:6px;font-size:12px;font-weight:600;color:var(--slate);letter-spacing:.03em}
@@ -256,7 +257,7 @@ const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbyi0HloLVLVR4AVkq--G
 const CLOUDINARY_CLOUD = 'dcmwgwwur';
 
 const BLOCKING = [
-  { id:'b1', text:'Касови продажби. При под 30% от средния брой касови продажби от справката в Т-бюлетина — бонусът отпада.' },
+  { id:'b1', text:'Касови продажби. При под 30% от средния брой касови продажби от справката в Т-бюлетина — бонусът отпада.', allowNoReport:true },
   { id:'b2', text:'Проверка на всички цели палета (неотворени сухи смеси за вече изтекъл срок)' },
   { id:'b3', text:'Всички в магазина с униформи и баджове ли са? + проверка от камери' },
   { id:'b4', text:'Изрядна документация на обекта и пожарогасители в срок на годност' },
@@ -576,6 +577,22 @@ function getSectorScore(sector) {
   return { score: genScore + specScore, maxScore: genMax + specMax, pct, genPct, specPct, genScore, genMax, specScore, specMax };
 }
 
+// Текст и цвят за стойност на блокиращ критерий.
+// 'NP' = „Няма справка" — критерият НЕ е оценен и НЕ е провал.
+function blockingLabel(v) {
+  if (v === 'DA') return { text: 'ДА',           color: '#0A7C59' };
+  if (v === 'NE') return { text: 'НЕ',           color: '#C0392B' };
+  if (v === 'NP') return { text: 'Няма справка', color: '#94A3B8' };
+  return { text: '—', color: '#94A3B8' };
+}
+
+// Предупреждение, когато справката за касови продажби липсва
+const NO_REPORT_WARNING = '⚠ Касови продажби — справката не е получена, критерият не е оценен.';
+
+function hasNoReport(blocking) {
+  return !!(blocking && blocking.b1 === 'NP');
+}
+
 function getOverallScore() {
   const blockingFail = BLOCKING.some(b => state.blocking[b.id] === 'NE');
 
@@ -616,6 +633,7 @@ function buildCheckUI() {
       <div class="score-row">
         <button class="score-btn sda" onclick="setScore('blocking','${b.id}','DA',this)">ДА ✓</button>
         <button class="score-btn sne" onclick="setScore('blocking','${b.id}','NE',this)">НЕ ✗</button>
+        ${b.allowNoReport ? `<button class="score-btn snp snp-report" onclick="setScore('blocking','${b.id}','NP',this)">НЯМА СПРАВКА</button>` : ''}
       </div>
       <div>
         <button class="note-toggle" onclick="toggleNote('bnote_${b.id}')">+ Забележка</button>
@@ -875,6 +893,10 @@ function renderSummary() {
       html += `<div class="chronic-item"><span class="chronic-name">${b.text}</span><span class="chronic-count">НЕ</span></div>`;
     });
     html += `</div>`;
+  }
+
+  if (hasNoReport(state.blocking)) {
+    html += `<div style="margin-bottom:14px;padding:10px 14px;background:#F1F5F9;border:1px solid #CBD5E1;border-left:4px solid #94A3B8;border-radius:8px;font-size:12px;font-weight:600;color:#475569;line-height:1.4">${NO_REPORT_WARNING}</div>`;
   }
 
   html += `<div class="sector-summary"><div class="sector-sum-hdr">Резултати по сектори (Общи % + Специфични %) / 2</div>`;
@@ -2351,10 +2373,12 @@ function generatePDF() {
 
   let blockHtml = '';
   BLOCKING.forEach(b => {
-    const v = state.blocking[b.id];
-    const color = v==='DA'?'#0A7C59':v==='NE'?'#C0392B':'#94A3B8';
-    blockHtml += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px;border-bottom:1px solid #f1f5f9"><span>${b.text}</span><strong style="color:${color}">${v==='DA'?'ДА':v==='NE'?'НЕ':'—'}</strong></div>`;
+    const bl = blockingLabel(state.blocking[b.id]);
+    blockHtml += `<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;font-size:11px;border-bottom:1px solid #f1f5f9"><span>${b.text}</span><strong style="color:${bl.color};white-space:nowrap">${bl.text}</strong></div>`;
   });
+  if (hasNoReport(state.blocking)) {
+    blockHtml += `<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #CBD5E1;font-size:11px;font-weight:700;color:#475569">${NO_REPORT_WARNING}</div>`;
+  }
 
   // Коментари — с четими имена на критериите
   let notesHtml = '';
@@ -2484,6 +2508,19 @@ function printEntry(idx) {
     });
   }
 
+  // Блокиращи критерии от запазеното state
+  const entryBlocking = (entry.state && entry.state.blocking) || entry.blocking || {};
+  let entryBlockHtml = '';
+  if (Object.keys(entryBlocking).length) {
+    BLOCKING.forEach(b => {
+      const bl = blockingLabel(entryBlocking[b.id]);
+      entryBlockHtml += `<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;font-size:11px;border-bottom:1px solid #f1f5f9"><span>${b.text}</span><strong style="color:${bl.color};white-space:nowrap">${bl.text}</strong></div>`;
+    });
+    if (hasNoReport(entryBlocking)) {
+      entryBlockHtml += `<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #CBD5E1;font-size:11px;font-weight:700;color:#475569">${NO_REPORT_WARNING}</div>`;
+    }
+  }
+
   // Коментари от запазеното state
   let entryNotesHtml = '';
   if (entry.state) {
@@ -2548,6 +2585,8 @@ function printEntry(idx) {
   <td style="padding:6px 8px;background:#F8FAFC;border:1px solid #e2e8f0"><div style="font-size:9px;font-weight:700;color:#64748B;text-transform:uppercase">Дата</div><div style="font-size:14px;font-weight:700">${entry.date}</div></td>
   <td style="padding:6px 8px;background:#F8FAFC;border:1px solid #e2e8f0"><div style="font-size:9px;font-weight:700;color:#64748B;text-transform:uppercase">Управител</div><div style="font-size:14px;font-weight:700">${entry.manager||'—'}</div></td>
 </tr></table>
+${entryBlockHtml?`<div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;margin-bottom:5px">Блокиращи критерии</div>
+<div style="background:#FFF5F5;border:1px solid #FECACA;border-radius:6px;padding:8px 12px;margin-bottom:14px">${entryBlockHtml}</div>`:''}
 <div style="font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;margin-bottom:5px">Резултати по сектори</div>
 <table style="border:1px solid #e2e8f0">
 <thead><tr style="background:#0D1B2A">

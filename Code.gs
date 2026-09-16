@@ -165,8 +165,8 @@ function doGet(e) {
           ];
           for (var bi = 0; bi < 4; bi++) {
             var bVal = entry[COL_BLOCK_START-1+bi]||'-';
-            var bCol = bVal==='DA'?'#0A7C59':bVal==='NE'?'#C0392B':'#94A3B8';
-            var bTxt = bVal==='DA'?'✅ ДА':bVal==='NE'?'❌ НЕ':'—';
+            var bCol = bVal==='DA'?'#0A7C59':bVal==='NE'?'#C0392B':bVal==='NP'?'#94A3B8':'#94A3B8';
+            var bTxt = bVal==='DA'?'✅ ДА':bVal==='NE'?'❌ НЕ':bVal==='NP'?'⚠ Няма справка':'—';
             blockRows += '<tr><td style="padding:5px 10px;font-size:11px;border-bottom:1px solid #F1F5F9">'+bTexts[bi]+'</td>'
               +'<td style="padding:5px 10px;font-weight:700;color:'+bCol+';border-bottom:1px solid #F1F5F9">'+bTxt+'</td></tr>';
           }
