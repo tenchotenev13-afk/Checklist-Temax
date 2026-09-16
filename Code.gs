@@ -23,7 +23,7 @@ var COL_BLOCK_START    = 59;  // Блок.1
 var COL_NOTES          = 63;
 var COL_REPEAT         = 64;
 var COL_DEADLINE       = 65;
-var TOTAL_COLS         = 66; // 65 данни + колона 66 за снимки (Cloudinary URLs)
+var TOTAL_COLS         = 67; // 65 данни + колона 66 снимки + колона 67 generalComment
 
 // ── MAIN ENTRY POINT ────────────────────────────────────────────
 function doGet(e) {
@@ -83,6 +83,8 @@ function doGet(e) {
         var shop    = e.parameter.shop || '';
         var date    = e.parameter.date || '';
         var manager = e.parameter.manager || '';
+        var tsParam = e.parameter.ts || '';
+        var tsMs    = tsParam ? new Date(tsParam).getTime() : 0;
         var photosParam = e.parameter.photos || '';
         var photosFromParam = {};
         try { if (photosParam) photosFromParam = JSON.parse(photosParam); } catch(pe) {}
@@ -97,17 +99,30 @@ function doGet(e) {
           var readColsE = Math.min(lastColE, TOTAL_COLS);
           var rowsE     = sheet2.getRange(2, 1, sheet2.getLastRow()-1, readColsE).getValues();
           // Намираме по магазин + дата
-          for (var ri = rowsE.length - 1; ri >= 0; ri--) {
-            var rowDate = rowsE[ri][2];
-            if (rowDate instanceof Date) {
-              rowDate = Utilities.formatDate(rowDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-            } else {
-              rowDate = String(rowDate).slice(0, 10);
+          // Стъпка 1: точно намиране по timestamp (ако е предоставен)
+          if (tsMs) {
+            for (var ri = rowsE.length - 1; ri >= 0; ri--) {
+              var rowHasPct1 = rowsE[ri][4] !== '' && rowsE[ri][4] !== null && rowsE[ri][4] !== undefined;
+              var shopMatch1 = String(rowsE[ri][1]).trim() === shop.trim();
+              if (shopMatch1 && rowHasPct1) {
+                var rowTs = rowsE[ri][0] instanceof Date ? rowsE[ri][0].getTime() : 0;
+                if (Math.abs(rowTs - tsMs) < 60000) { entry = rowsE[ri]; break; }
+              }
             }
-            // Само редове С данни (не празни редове от грешка)
-            var rowHasPct = rowsE[ri][4] !== '' && rowsE[ri][4] !== null && rowsE[ri][4] !== undefined;
-            if (String(rowsE[ri][1]).trim() === shop.trim() && rowDate === date && rowHasPct) {
-              entry = rowsE[ri]; break;
+          }
+          // Стъпка 2: fallback по shop + date (ако ts не е намерен)
+          if (!entry) {
+            for (var ri = rowsE.length - 1; ri >= 0; ri--) {
+              var rowDate = rowsE[ri][2];
+              if (rowDate instanceof Date) {
+                rowDate = Utilities.formatDate(rowDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+              } else {
+                rowDate = String(rowDate).slice(0, 10);
+              }
+              var rowHasPct2 = rowsE[ri][4] !== '' && rowsE[ri][4] !== null && rowsE[ri][4] !== undefined;
+              if (String(rowsE[ri][1]).trim() === shop.trim() && rowDate === date && rowHasPct2) {
+                entry = rowsE[ri]; break;
+              }
             }
           }
           // Fallback: последен запис за магазина
@@ -172,7 +187,14 @@ function doGet(e) {
           }
         }
 
-        var notes     = entry?(entry[COL_NOTES-1]||''):'';
+        var notes          = entry?(entry[COL_NOTES-1]||''):'';
+        var generalComment = entry?(entry[66]||''):'';
+        // Ако ресендът изпраща пълни бележки от localStorage — ползваме тях
+        var fullNotes    = e.parameter.fullNotes    || '';
+        var fullRepeat   = e.parameter.fullRepeat   || '';
+        var fullDeadline = e.parameter.fullDeadline || '';
+        var gcParam      = e.parameter.generalComment || '';
+        // Временни placeholder-и — ще се презапишат след четене на Sheets
         var photosRaw = entry?(entry[65]||''):'';
         var photosObj = {};
         try { if(photosRaw) photosObj = JSON.parse(photosRaw); } catch(e) {}
@@ -182,6 +204,11 @@ function doGet(e) {
         });
         var repeats   = entry?(entry[COL_REPEAT-1]||''):'';
         var deadlines = entry?(entry[COL_DEADLINE-1]||''):'';
+        // Ако ресендът изпраща пълни бележки от localStorage — ползваме тях (без лимит)
+        if (fullNotes)    notes          = fullNotes;
+        if (fullRepeat)   repeats        = fullRepeat;
+        if (fullDeadline) deadlines      = fullDeadline;
+        if (gcParam)      generalComment = gcParam;
 
         // Забележки — таблица като в PDF отчета
         var notesHtml = '';
@@ -270,6 +297,7 @@ function doGet(e) {
             ph += '</div>';
             return ph;
           })() : '')
+          +(generalComment ? '<div style="margin-top:14px;padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px"><div style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">📝 Допълнителни бележки</div><div style="font-size:12px;color:#374151;white-space:pre-wrap">'+generalComment+'</div></div>' : '')
           +'<p style="margin-top:14px;font-size:10px;color:#94A3B8">Изпратено автоматично от ТеМАХ Контролна карта · TeMAX</p>'
           +'</div></div>';
 
@@ -346,6 +374,62 @@ function doGet(e) {
           errSheet.appendRow([new Date(), 'parse error', parseErr.toString(), String(data).slice(0,200)]);
         } catch(ex) {}
         return sendJSON({status:'error', message:'JSON parse грешка: ' + parseErr.toString()}, cb);
+      }
+    }
+
+    // Обновяване на пълни бележки — ?action=updateNotes
+    if (action === 'updateNotes') {
+      try {
+        var shopN      = e.parameter.shop || '';
+        var dateN      = e.parameter.date || '';
+        var tsN        = e.parameter.ts   || '';
+        var tsMsN      = tsN ? new Date(tsN).getTime() : 0;
+        var notesN     = e.parameter.notes    || '';
+        var repeatN    = e.parameter.repeat   || '';
+        var deadlineN  = e.parameter.deadline || '';
+        var gcN        = e.parameter.gc       || '';
+        var ss4 = SpreadsheetApp.openById(SS_ID);
+        var sh4 = ss4.getSheetByName(SS_RAW);
+        if (sh4 && sh4.getLastRow() > 1) {
+          var nCols = Math.min(sh4.getLastColumn(), 5);
+          var rows4 = sh4.getRange(2, 1, sh4.getLastRow()-1, nCols).getValues();
+          for (var ri4 = rows4.length - 1; ri4 >= 0; ri4--) {
+            var hasPct4 = rows4[ri4][4] !== '' && rows4[ri4][4] !== null;
+            var shopMatch4 = String(rows4[ri4][1]).trim() === shopN.trim();
+            // Намираме по ts или shop
+            var found = false;
+            if (tsMsN && shopMatch4 && hasPct4) {
+              var rowTs4 = rows4[ri4][0] instanceof Date ? rows4[ri4][0].getTime() : 0;
+              if (Math.abs(rowTs4 - tsMsN) < 60000) found = true;
+            }
+            if (!found) {
+              var rd4 = rows4[ri4][2];
+              if (rd4 instanceof Date) rd4 = Utilities.formatDate(rd4, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+              else rd4 = String(rd4).slice(0,10);
+              if (shopMatch4 && rd4 === dateN && hasPct4) found = true;
+            }
+            if (found) {
+              if (sh4.getMaxColumns() < 67) sh4.insertColumnsAfter(sh4.getMaxColumns(), 67 - sh4.getMaxColumns());
+              var chunkN = parseInt(e.parameter.chunk || '1', 10);
+              // chunk=1 → презаписваме; chunk>1 → добавяме към съществуващото
+              if (notesN) {
+                if (chunkN <= 1) {
+                  sh4.getRange(ri4+2, COL_NOTES).setValue(notesN);
+                } else {
+                  var existing = sh4.getRange(ri4+2, COL_NOTES).getValue() || '';
+                  sh4.getRange(ri4+2, COL_NOTES).setValue(existing ? existing + ' | ' + notesN : notesN);
+                }
+              }
+              if (repeatN)   sh4.getRange(ri4+2, COL_REPEAT).setValue(repeatN);
+              if (deadlineN) sh4.getRange(ri4+2, COL_DEADLINE).setValue(deadlineN);
+              if (gcN)       sh4.getRange(ri4+2, 67).setValue(gcN);
+              return sendJSON({status:'ok', message:'Бележките са обновени'}, cb);
+            }
+          }
+        }
+        return sendJSON({status:'error', message:'Записът не е намерен'}, cb);
+      } catch(err4) {
+        return sendJSON({status:'error', message:'Грешка: '+err4.toString()}, cb);
       }
     }
 
@@ -470,6 +554,7 @@ function getAllRows() {
         repeatIssues: r[COL_REPEAT   - 1] || '',
         deadlines:    r[COL_DEADLINE - 1] || '',
         photos:       (function(v){ try{ return v ? JSON.parse(v) : {}; } catch(e){ return {}; } })(r[65]),
+        generalComment: r[66] || '',
       };
     });
 
@@ -552,6 +637,17 @@ function writeRow(d) {
     d.repeatIssues || '-',
     d.deadlines    || '-'
   );
+
+  // Колона 66 (BN) за снимки — празна тук, попълва се отделно от addPhotos
+  row.push('');
+
+  // Допълнителни бележки — колона 67 (BO)
+  row.push(d.generalComment || '');
+
+  // Осигуряваме достатъчно колони
+  if (sheet.getMaxColumns() < 67) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), 67 - sheet.getMaxColumns());
+  }
 
   // Запис на реда
   sheet.appendRow(row);
