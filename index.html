@@ -619,7 +619,7 @@ function buildCheckUI() {
       </div>
       <div>
         <button class="note-toggle" onclick="toggleNote('bnote_${b.id}')">+ Забележка</button>
-        <textarea class="note-input" id="bnote_${b.id}" style="display:none" placeholder="Забележка..." oninput="state.notes['${b.id}']=this.value"></textarea>
+        <textarea class="note-input" id="bnote_${b.id}" style="display:none" placeholder="Забележка..." oninput="setNote('${b.id}', this.value)"></textarea>
       </div>
     </div>`;
   });
@@ -661,7 +661,7 @@ function buildCheckUI() {
           </div>
           <div>
             <button class="note-toggle" onclick="toggleNote('gnote_${id}')">+ Забележка</button>
-            <textarea class="note-input" id="gnote_${id}" style="display:none" placeholder="Забележка..." oninput="state.notes['${id}']=this.value"></textarea>
+            <textarea class="note-input" id="gnote_${id}" style="display:none" placeholder="Забележка..." oninput="setNote('${id}', this.value)"></textarea>
           </div>
         </div>`;
       }
@@ -700,12 +700,12 @@ function buildCheckUI() {
         <div>
           <button class="note-toggle" onclick="toggleNote('spnote_${sp.id}')">+ Забележка / Повторна грешка</button>
           <div id="spnote_${sp.id}_extra" style="display:none">
-            <textarea class="note-input" id="spnote_${sp.id}" placeholder="Конкретен проблем..." oninput="state.notes['${sp.id}']=this.value" style="margin-bottom:6px"></textarea>
+            <textarea class="note-input" id="spnote_${sp.id}" placeholder="Конкретен проблем..." oninput="setNote('${sp.id}', this.value)" style="margin-bottom:6px"></textarea>
             <div class="repeat-row">
               <span class="repeat-label">Повторна грешка:</span>
               <button class="repeat-btn" id="rep_${sp.id}_Y" onclick="setRepeat('${sp.id}','Y')">ДА</button>
               <button class="repeat-btn" id="rep_${sp.id}_N" onclick="setRepeat('${sp.id}','N')">НЕ</button>
-              <input class="deadline-input" id="deadline_${sp.id}" type="text" placeholder="Срок / Отговорник" oninput="state.deadline['${sp.id}']=this.value">
+              <input class="deadline-input" id="deadline_${sp.id}" type="text" placeholder="Срок / Отговорник" oninput="setDeadline('${sp.id}', this.value)">
             </div>
           </div>
         </div>
@@ -752,12 +752,14 @@ function setScore(type, id, val, btn) {
   btn.closest('.score-row').querySelectorAll('.score-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   updateScores();
+  saveDraft();
 }
 
 function setRepeat(id, val) {
   state.repeat[id] = val;
   document.getElementById(`rep_${id}_Y`).className = 'repeat-btn' + (val==='Y'?' active-y':'');
   document.getElementById(`rep_${id}_N`).className = 'repeat-btn' + (val==='N'?' active-n':'');
+  saveDraft();
 }
 
 function toggleNote(id) {
@@ -964,6 +966,8 @@ var autosaveInterval = null;
 
 function saveDraft() {
   try {
+    // Заключена форма (вече записана проверка) — не пипаме черновата
+    if (localStorage.getItem('temax_locked') === '1') return;
     const shop = document.getElementById('shopName').value.trim();
     if (!shop) return; // Не запазваме без магазин
     const draft = {
@@ -983,13 +987,50 @@ function clearDraft() {
   localStorage.removeItem('temax_draft');
 }
 
+// Дебоунснат запис — за полета, които се променят при всяко натискане на клавиш
+var draftSaveTimer = null;
+function saveDraftSoon() {
+  if (draftSaveTimer) clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(saveDraft, 400);
+}
+
+function setNote(id, val) {
+  if (!state.notes) state.notes = {};
+  state.notes[id] = val;
+  saveDraftSoon();
+}
+
+function setDeadline(id, val) {
+  if (!state.deadline) state.deadline = {};
+  state.deadline[id] = val;
+  saveDraftSoon();
+}
+
 function startAutosave() {
   if (autosaveInterval) clearInterval(autosaveInterval);
-  autosaveInterval = setInterval(saveDraft, 60000); // на 60 сек.
+  autosaveInterval = setInterval(saveDraft, 15000); // на 15 сек.
 }
+
+// Android Chrome може да убие страницата при отваряне на камерата —
+// записваме черновата преди страницата да бъде скрита/освободена.
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'hidden') saveDraft();
+});
+window.addEventListener('pagehide', function() { saveDraft(); });
 
 function checkDraft() {
   try {
+    // Чистим резервното копие, ако е по-старо от 24ч
+    try {
+      const rawBackup = localStorage.getItem('temax_draft_backup');
+      if (rawBackup) {
+        const backup = JSON.parse(rawBackup);
+        if (!backup || !backup.ts || (Date.now() - backup.ts) > 24 * 60 * 60 * 1000) {
+          localStorage.removeItem('temax_draft_backup');
+        }
+      }
+    } catch(eb) { localStorage.removeItem('temax_draft_backup'); }
+
     const raw = localStorage.getItem('temax_draft');
     if (!raw) return;
     const draft = JSON.parse(raw);
@@ -1017,7 +1058,12 @@ function checkDraft() {
       window.scrollTo({top: 0, behavior: 'smooth'});
       showSyncNotification('📋 Черновата е възстановена — продължете с попълването!', 'success');
     } else {
-      clearDraft();
+      // При 'Отказ' НЕ трием черновата — преместваме я в резервно копие (пази се 24ч),
+      // за да може да бъде възстановена ръчно (localStorage: temax_draft_backup).
+      try {
+        localStorage.setItem('temax_draft_backup', raw);
+        localStorage.removeItem('temax_draft');
+      } catch(e2) {}
     }
   } catch(e) {}
 }
@@ -1687,6 +1733,7 @@ async function handlePhotoUpload(event, sid) {
       thumb.innerHTML = '<img src="' + url + '" style="width:72px;height:72px;object-fit:cover;border-radius:6px;cursor:pointer" onclick="window.open(this.src)">'
         + '<button onclick="removePhoto(\'' + sid + '\',\'' + url + '\',this.parentNode)" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1">✕</button>';
       thumb.style.position = 'relative';
+      saveDraft(); // веднага запазваме URL-а на снимката в черновата
     } catch(err) {
       thumb.innerHTML = '<div style="color:#C0392B;font-size:10px;padding:4px">❌ ' + err.message.slice(0,30) + '</div>';
       console.error('Upload error:', err);
