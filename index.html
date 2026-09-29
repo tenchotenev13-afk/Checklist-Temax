@@ -1818,7 +1818,18 @@ const photoQueue = (function() {
       return readAll().then(function(all) {
         items = all.filter(function(r) { return String(r.sessionId) === String(sessionId); });
         items.sort(function(a, b) { return (a.ts || 0) - (b.ts || 0); });
-        return items.slice();
+
+        // При зареждане на страницата няма как да тече качване — записите,
+        // заварени като 'uploading', са от убита страница. Ако останат така,
+        // processQueue() никога не ги взима (той гледа само 'pending'/'error')
+        // и снимката заяжда завинаги.
+        const stuck = items.filter(function(r) { return r.status === 'uploading'; });
+        if (!stuck.length) return items.slice();
+        stuck.forEach(function(r) { r.status = 'pending'; r.error = ''; });
+        console.log('[ТеМАХ] Заседнали качвания, върнати на изчакване:', stuck.length);
+        return write(function(store) {
+          stuck.forEach(function(r) { store.put(toRecord(r)); });
+        }).then(function() { return items.slice(); });
       });
     },
 
