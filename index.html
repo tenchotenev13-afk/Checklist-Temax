@@ -1530,7 +1530,7 @@ function saveCheck() {
     const photoKeys = Object.keys(photosToSend || {}).filter(s => photosToSend[s] && photosToSend[s].length);
     console.log('[ТеМАХ] Callback fires. photosToSend sectors:', photoKeys.length);
     if (photoKeys.length > 0) {
-      sendPhotosToSheets(shop, date, photosToSend);
+      sendPhotosToSheets(shop, date, photosToSend, savedTs);
     } else {
       console.log('[ТеМАХ] Няма снимки за изпращане');
     }
@@ -1822,7 +1822,7 @@ function removePhoto(sid, url, thumbEl) {
   if (thumbEl) thumbEl.remove();
 }
 
-function sendPhotosToSheets(shop, date, photos) {
+function sendPhotosToSheets(shop, date, photos, ts) {
   if (!photos || !Object.keys(photos).length) return;
   // Филтрираме само сектори със снимки
   const filtered = {};
@@ -1832,7 +1832,7 @@ function sendPhotosToSheets(shop, date, photos) {
   const sids = Object.keys(filtered);
   if (!sids.length) return;
 
-  console.log('[ТеМАХ] sendPhotosToSheets:', sids.length, 'сектора, shop:', shop, 'date:', date);
+  console.log('[ТеМАХ] sendPhotosToSheets:', sids.length, 'сектора, shop:', shop, 'date:', date, 'ts:', ts || '(няма)');
   console.log('[ТеМАХ] Photos data:', JSON.stringify(filtered).slice(0,200));
   showSyncNotification('📷 Изпращане на ' + sids.length + ' сектора снимки...', 'warning');
 
@@ -1868,6 +1868,7 @@ function sendPhotosToSheets(shop, date, photos) {
       + '?action=addPhotos'
       + '&shop=' + encodeURIComponent(shop)
       + '&date=' + encodeURIComponent(date)
+      + '&ts=' + encodeURIComponent(ts || '')
       + '&photos=' + encodeURIComponent(JSON.stringify(sectorPhotos))
       + '&callback=' + cb;
     sc.onerror = function() {
@@ -1966,7 +1967,7 @@ function resendToSheets(entryTs) {
         const entryPhotos = entry.photos || {};
         const photoKeys = Object.keys(entryPhotos).filter(s => entryPhotos[s] && entryPhotos[s].length);
         if (photoKeys.length) {
-          sendPhotosToSheets(entry.shop, entry.date, entryPhotos);
+          sendPhotosToSheets(entry.shop, entry.date, entryPhotos, entry.ts);
         }
         // Пълни бележки (updateNotes) — след 1 сек.
         setTimeout(function() {

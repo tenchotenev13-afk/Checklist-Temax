@@ -313,33 +313,56 @@ function doGet(e) {
       try {
         var shopP   = e.parameter.shop || '';
         var dateP   = e.parameter.date || '';
+        var tsP     = e.parameter.ts || '';
+        var tsMsP   = tsP ? new Date(tsP).getTime() : 0;
         var photosJ = e.parameter.photos || '{}';
         var newPhotos = JSON.parse(photosJ);
-        Logger.log('addPhotos: shop=' + shopP + ' date=' + dateP + ' sectors=' + Object.keys(newPhotos).join(','));
+        Logger.log('addPhotos: shop=' + shopP + ' date=' + dateP + ' ts=' + tsP + ' sectors=' + Object.keys(newPhotos).join(','));
         var ss3     = SpreadsheetApp.openById(SS_ID);
         var sheet3  = ss3.getSheetByName(SS_RAW);
         if (sheet3 && sheet3.getLastRow() > 1) {
           var rows3 = sheet3.getRange(2, 1, sheet3.getLastRow()-1, 3).getValues();
           var rowsWithData = sheet3.getRange(2, 1, sheet3.getLastRow()-1, Math.min(sheet3.getLastColumn(),5)).getValues();
-          for (var ri3 = rowsWithData.length - 1; ri3 >= 0; ri3--) {
-            var rd3 = rowsWithData[ri3][2];
-            if (rd3 instanceof Date) rd3 = Utilities.formatDate(rd3, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-            else rd3 = String(rd3).slice(0,10);
-            // Само редове С данни (avgPct не е празно) — пропускаме празните редове
-            var hasPct = rowsWithData[ri3][4] !== '' && rowsWithData[ri3][4] !== null && rowsWithData[ri3][4] !== undefined;
-            if (String(rowsWithData[ri3][1]).trim() === shopP.trim() && rd3 === dateP && hasPct) {
-              if (sheet3.getMaxColumns() < 66) sheet3.insertColumnsAfter(sheet3.getMaxColumns(), 66 - sheet3.getMaxColumns());
-              // Merge с вече записани снимки (изпращаме по 1 сектор)
-              var cell = sheet3.getRange(ri3 + 2, 66);
-              var existing = {};
-              try { var ev = cell.getValue(); if (ev) existing = JSON.parse(ev); } catch(pe) {}
-              var keys = Object.keys(newPhotos);
-              for (var ki = 0; ki < keys.length; ki++) {
-                existing[keys[ki]] = newPhotos[keys[ki]];
+          var foundRow3 = -1; // 0-базиран индекс в rowsWithData
+
+          // Стъпка 1: точно намиране по timestamp (ако е предоставен)
+          if (tsMsP) {
+            for (var rt3 = rowsWithData.length - 1; rt3 >= 0; rt3--) {
+              var hasPctT = rowsWithData[rt3][4] !== '' && rowsWithData[rt3][4] !== null && rowsWithData[rt3][4] !== undefined;
+              var shopMatchT = String(rowsWithData[rt3][1]).trim() === shopP.trim();
+              if (shopMatchT && hasPctT) {
+                var rowTs3 = rowsWithData[rt3][0] instanceof Date ? rowsWithData[rt3][0].getTime() : 0;
+                if (Math.abs(rowTs3 - tsMsP) < 60000) { foundRow3 = rt3; break; }
               }
-              cell.setValue(JSON.stringify(existing));
-              return sendJSON({status:'ok', message:'Снимките са записани'}, cb);
             }
+          }
+
+          // Стъпка 2: fallback по shop + date (ако ts липсва или не е намерен)
+          if (foundRow3 < 0) {
+            for (var ri3 = rowsWithData.length - 1; ri3 >= 0; ri3--) {
+              var rd3 = rowsWithData[ri3][2];
+              if (rd3 instanceof Date) rd3 = Utilities.formatDate(rd3, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+              else rd3 = String(rd3).slice(0,10);
+              // Само редове С данни (avgPct не е празно) — пропускаме празните редове
+              var hasPct = rowsWithData[ri3][4] !== '' && rowsWithData[ri3][4] !== null && rowsWithData[ri3][4] !== undefined;
+              if (String(rowsWithData[ri3][1]).trim() === shopP.trim() && rd3 === dateP && hasPct) {
+                foundRow3 = ri3; break;
+              }
+            }
+          }
+
+          if (foundRow3 >= 0) {
+            if (sheet3.getMaxColumns() < 66) sheet3.insertColumnsAfter(sheet3.getMaxColumns(), 66 - sheet3.getMaxColumns());
+            // Merge с вече записани снимки (изпращаме по 1 сектор)
+            var cell = sheet3.getRange(foundRow3 + 2, 66);
+            var existing = {};
+            try { var ev = cell.getValue(); if (ev) existing = JSON.parse(ev); } catch(pe) {}
+            var keys = Object.keys(newPhotos);
+            for (var ki = 0; ki < keys.length; ki++) {
+              existing[keys[ki]] = newPhotos[keys[ki]];
+            }
+            cell.setValue(JSON.stringify(existing));
+            return sendJSON({status:'ok', message:'Снимките са записани'}, cb);
           }
         }
         Logger.log('addPhotos: ЗАПИСЪТ НЕ Е НАМЕРЕН за shop=' + shopP + ' date=' + dateP);
