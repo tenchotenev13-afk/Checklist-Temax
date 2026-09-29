@@ -620,6 +620,16 @@ function buildCheckUI() {
   const container = document.getElementById('checkContent');
   let html = '';
 
+  // ── Възстановена чернова: маркираме вече избраното още в HTML-а ──
+  // (setScore/setRepeat пипат DOM-а само при клик, затова при повторен
+  //  рендер бутоните оставаха немаркирани)
+  const act    = (type, id, val) => (state[type] && state[type][id] === val) ? ' active' : '';
+  const esc    = v => String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const noteOf = id => (state.notes    && state.notes[id])    || '';
+  const dlOf   = id => (state.deadline && state.deadline[id]) || '';
+  const repOf  = id => (state.repeat   && state.repeat[id])   || '';
+
   // Блокиращи критерии
   html += `<div class="blocking-banner">
     <span class="icon">⛔</span>
@@ -631,13 +641,13 @@ function buildCheckUI() {
       <div class="criteria-num">БЛОКИРАЩ ${i+1}</div>
       <div class="criteria-label"><span class="block-tag">БЛОКИРАЩ</span>${b.text}</div>
       <div class="score-row">
-        <button class="score-btn sda" onclick="setScore('blocking','${b.id}','DA',this)">ДА ✓</button>
-        <button class="score-btn sne" onclick="setScore('blocking','${b.id}','NE',this)">НЕ ✗</button>
-        ${b.allowNoReport ? `<button class="score-btn snp snp-report" onclick="setScore('blocking','${b.id}','NP',this)">НЯМА СПРАВКА</button>` : ''}
+        <button class="score-btn sda${act('blocking', b.id, 'DA')}" onclick="setScore('blocking','${b.id}','DA',this)">ДА ✓</button>
+        <button class="score-btn sne${act('blocking', b.id, 'NE')}" onclick="setScore('blocking','${b.id}','NE',this)">НЕ ✗</button>
+        ${b.allowNoReport ? `<button class="score-btn snp snp-report${act('blocking', b.id, 'NP')}" onclick="setScore('blocking','${b.id}','NP',this)">НЯМА СПРАВКА</button>` : ''}
       </div>
       <div>
         <button class="note-toggle" onclick="toggleNote('bnote_${b.id}')">+ Забележка</button>
-        <textarea class="note-input" id="bnote_${b.id}" style="display:none" placeholder="Забележка..." oninput="setNote('${b.id}', this.value)"></textarea>
+        <textarea class="note-input" id="bnote_${b.id}" style="display:${noteOf(b.id) ? 'block' : 'none'}" placeholder="Забележка..." oninput="setNote('${b.id}', this.value)">${esc(noteOf(b.id))}</textarea>
       </div>
     </div>`;
   });
@@ -672,14 +682,14 @@ function buildCheckUI() {
           <div class="criteria-num">${gi+1}.</div>
           <div class="criteria-label">${gc.label}</div>
           <div class="score-row">
-            <button class="score-btn s1"  onclick="setScore('general','${id}','1',this)">1</button>
-            <button class="score-btn s05" onclick="setScore('general','${id}','0.5',this)">0.5</button>
-            <button class="score-btn s0"  onclick="setScore('general','${id}','0',this)">0</button>
-            <button class="score-btn snp" onclick="setScore('general','${id}','NP',this)">Н/П</button>
+            <button class="score-btn s1${act('general', id, '1')}"  onclick="setScore('general','${id}','1',this)">1</button>
+            <button class="score-btn s05${act('general', id, '0.5')}" onclick="setScore('general','${id}','0.5',this)">0.5</button>
+            <button class="score-btn s0${act('general', id, '0')}"  onclick="setScore('general','${id}','0',this)">0</button>
+            <button class="score-btn snp${act('general', id, 'NP')}" onclick="setScore('general','${id}','NP',this)">Н/П</button>
           </div>
           <div>
             <button class="note-toggle" onclick="toggleNote('gnote_${id}')">+ Забележка</button>
-            <textarea class="note-input" id="gnote_${id}" style="display:none" placeholder="Забележка..." oninput="setNote('${id}', this.value)"></textarea>
+            <textarea class="note-input" id="gnote_${id}" style="display:${noteOf(id) ? 'block' : 'none'}" placeholder="Забележка..." oninput="setNote('${id}', this.value)">${esc(noteOf(id))}</textarea>
           </div>
         </div>`;
       }
@@ -699,15 +709,15 @@ function buildCheckUI() {
 
       let btns = '';
       if (maxVal === 1) {
-        btns = `<button class="score-btn s1"  onclick="setScore('specific','${sp.id}','1',this)">1</button>
-                <button class="score-btn s05" onclick="setScore('specific','${sp.id}','0.5',this)">0.5</button>
-                <button class="score-btn s0"  onclick="setScore('specific','${sp.id}','0',this)">0</button>
-                <button class="score-btn snp" onclick="setScore('specific','${sp.id}','NP',this)">Н/П</button>`;
+        btns = `<button class="score-btn s1${act('specific', sp.id, '1')}"  onclick="setScore('specific','${sp.id}','1',this)">1</button>
+                <button class="score-btn s05${act('specific', sp.id, '0.5')}" onclick="setScore('specific','${sp.id}','0.5',this)">0.5</button>
+                <button class="score-btn s0${act('specific', sp.id, '0')}"  onclick="setScore('specific','${sp.id}','0',this)">0</button>
+                <button class="score-btn snp${act('specific', sp.id, 'NP')}" onclick="setScore('specific','${sp.id}','NP',this)">Н/П</button>`;
       } else {
         const vals = maxVal === 2 ? ['2','1','0','NP'] : ['3','2','1','0','NP'];
         btns = vals.map(v => {
           const cls = v==='NP'?'snp':v===String(maxVal)?'s1':v==='0'?'s0':'s05';
-          return `<button class="score-btn ${cls}" onclick="setScore('specific','${sp.id}','${v}',this)">${v==='NP'?'Н/П':v}</button>`;
+          return `<button class="score-btn ${cls}${act('specific', sp.id, v)}" onclick="setScore('specific','${sp.id}','${v}',this)">${v==='NP'?'Н/П':v}</button>`;
         }).join('');
       }
 
@@ -717,13 +727,13 @@ function buildCheckUI() {
         <div class="score-row">${btns}</div>
         <div>
           <button class="note-toggle" onclick="toggleNote('spnote_${sp.id}')">+ Забележка / Повторна грешка</button>
-          <div id="spnote_${sp.id}_extra" style="display:none">
-            <textarea class="note-input" id="spnote_${sp.id}" placeholder="Конкретен проблем..." oninput="setNote('${sp.id}', this.value)" style="margin-bottom:6px"></textarea>
+          <div id="spnote_${sp.id}_extra" style="display:${(noteOf(sp.id) || dlOf(sp.id) || repOf(sp.id)) ? 'block' : 'none'}">
+            <textarea class="note-input" id="spnote_${sp.id}" placeholder="Конкретен проблем..." oninput="setNote('${sp.id}', this.value)" style="margin-bottom:6px">${esc(noteOf(sp.id))}</textarea>
             <div class="repeat-row">
               <span class="repeat-label">Повторна грешка:</span>
-              <button class="repeat-btn" id="rep_${sp.id}_Y" onclick="setRepeat('${sp.id}','Y')">ДА</button>
-              <button class="repeat-btn" id="rep_${sp.id}_N" onclick="setRepeat('${sp.id}','N')">НЕ</button>
-              <input class="deadline-input" id="deadline_${sp.id}" type="text" placeholder="Срок / Отговорник" oninput="setDeadline('${sp.id}', this.value)">
+              <button class="repeat-btn${repOf(sp.id) === 'Y' ? ' active-y' : ''}" id="rep_${sp.id}_Y" onclick="setRepeat('${sp.id}','Y')">ДА</button>
+              <button class="repeat-btn${repOf(sp.id) === 'N' ? ' active-n' : ''}" id="rep_${sp.id}_N" onclick="setRepeat('${sp.id}','N')">НЕ</button>
+              <input class="deadline-input" id="deadline_${sp.id}" type="text" placeholder="Срок / Отговорник" value="${esc(dlOf(sp.id))}" oninput="setDeadline('${sp.id}', this.value)">
             </div>
           </div>
         </div>
