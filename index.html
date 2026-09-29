@@ -1074,6 +1074,8 @@ function checkDraft() {
       if (draft.state) {
         Object.assign(state, draft.state);
         buildCheckUI(); // rebuild sectors with saved state
+        // buildCheckUI създава празни контейнери — връщаме миниатюрите на снимките
+        Object.keys(state.photos || {}).forEach(sid => renderPhotoPreview(sid));
       }
       // Превключваме към таб Проверка — важно за мобилни устройства
       switchView('check');
@@ -1669,10 +1671,15 @@ let activeShopFilter = 'ALL';
 // ══════════════════════════════════════════════
 
 async function compressImage(file, maxW=1200, quality=0.78) {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    // Без тези reject-и промисът виси завинаги при повреден или неподдържан
+    // файл (напр. HEIC) — pendingUploads оставаше завишен, а миниатюрата
+    // се въртеше без край. Сега грешката стига до „Опитай пак".
+    reader.onerror = () => reject(new Error('Файлът не може да се прочете'));
     reader.onload = e => {
       const img = new Image();
+      img.onerror = () => reject(new Error('Невалидно изображение'));
       img.onload = () => {
         const canvas = document.createElement('canvas');
         let w = img.width, h = img.height;
@@ -1689,6 +1696,7 @@ async function compressImage(file, maxW=1200, quality=0.78) {
 
 async function uploadToCloudinary(file, sid, shop, date) {
   pendingUploads++;
+  try {
   const compressed = await compressImage(file);
   const fd = new FormData();
   fd.append('file', compressed, file.name);
@@ -1710,17 +1718,81 @@ async function uploadToCloudinary(file, sid, shop, date) {
   });
   const data = await resp.json();
   console.log('[ТеМАХ] Cloudinary response public_id:', data.public_id);
-  pendingUploads = Math.max(0, pendingUploads - 1);
   if (!data.secure_url) throw new Error(data.error && data.error.message || 'Upload failed');
   return data.secure_url;
+  } finally {
+    // ВАЖНО: и при грешка — иначе броячът остава завишен и saveCheck()
+    // предупреждава за „незавършени снимки" до края на сесията
+    pendingUploads = Math.max(0, pendingUploads - 1);
+  }
+}
+
+// Лимит: максимум 10 снимки на сектор
+const MAX_PHOTOS = 10;
+
+// Качва един файл в подадената миниатюра. При грешка миниатюрата ОСТАВА
+// с ❌ и бутон „Опитай пак", който качва СЪЩИЯ файл отново.
+async function uploadPhotoFile(file, sid, shop, date, thumb) {
+  thumb.className = 'photo-thumb uploading';
+  thumb.style.position = '';
+  thumb.innerHTML = '<div class="thumb-spinner">⏳</div>';
+  try {
+    updateUploadStatus(sid);
+    const url = await uploadToCloudinary(file, sid, shop, date);
+    // Store URL
+    if (!state.photos) state.photos = {};
+    if (!state.photos[sid]) state.photos[sid] = [];
+    state.photos[sid].push(url);
+    // Update thumbnail
+    thumb.className = 'photo-thumb';
+    thumb.innerHTML = '<img src="' + url + '" style="width:72px;height:72px;object-fit:cover;border-radius:6px;cursor:pointer" onclick="window.open(this.src)">'
+      + '<button onclick="removePhoto(\'' + sid + '\',\'' + url + '\',this.parentNode)" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1">✕</button>';
+    thumb.style.position = 'relative';
+    saveDraft(); // веднага запазваме URL-а на снимката в черновата
+  } catch(err) {
+    console.error('Upload error:', err);
+    showUploadError(file, sid, shop, date, thumb, err);
+  }
+}
+
+// Миниатюра за неуспешно качване — НЕ се трие, за да може да се опита пак
+function showUploadError(file, sid, shop, date, thumb, err) {
+  thumb.className = 'photo-thumb';
+  thumb.style.position = 'relative';
+  thumb.innerHTML = '';
+
+  const box = document.createElement('div');
+  box.style.cssText = 'width:72px;height:72px;border:2px dashed #FECACA;border-radius:6px;background:#FFF5F5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:2px;box-sizing:border-box';
+
+  const text = String((err && err.message) || err || 'Грешка');
+  const msg = document.createElement('div');
+  msg.style.cssText = 'color:#C0392B;font-size:9px;line-height:1.15;text-align:center;word-break:break-word;max-height:26px;overflow:hidden';
+  msg.textContent = '❌ ' + text.slice(0, 30);
+  msg.title = text;
+
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.textContent = '↻ Опитай пак';
+  retry.style.cssText = 'background:#3B5BDB;border:none;color:#fff;border-radius:5px;padding:3px 5px;font-size:9px;font-weight:600;cursor:pointer;font-family:inherit';
+  retry.addEventListener('click', function() {
+    // Пазим лимита — междувременно може да са добавени други снимки
+    const existingNow = (state.photos && state.photos[sid]) ? state.photos[sid].length : 0;
+    if (existingNow >= MAX_PHOTOS) {
+      alert('Максималният брой снимки за този сектор е ' + MAX_PHOTOS + '. Моля изтрийте стари снимки преди да опитате пак.');
+      return;
+    }
+    uploadPhotoFile(file, sid, shop, date, thumb);
+  });
+
+  box.appendChild(msg);
+  box.appendChild(retry);
+  thumb.appendChild(box);
 }
 
 async function handlePhotoUpload(event, sid) {
   const files = Array.from(event.target.files);
   if (!files.length) return;
 
-  // Лимит: максимум 10 снимки на сектор
-  const MAX_PHOTOS = 10;
   const existing = (state.photos && state.photos[sid]) ? state.photos[sid].length : 0;
   const remaining = MAX_PHOTOS - existing;
   if (remaining <= 0) {
@@ -1737,29 +1809,9 @@ async function handlePhotoUpload(event, sid) {
   if (!previewEl) return;
 
   for (const file of filesToProcess) {
-    // Show uploading thumbnail
     const thumb = document.createElement('div');
-    thumb.className = 'photo-thumb uploading';
-    thumb.innerHTML = '<div class="thumb-spinner">⏳</div>';
     previewEl.appendChild(thumb);
-
-    try {
-      updateUploadStatus(sid);
-      const url = await uploadToCloudinary(file, sid, shop, date);
-      // Store URL
-      if (!state.photos) state.photos = {};
-      if (!state.photos[sid]) state.photos[sid] = [];
-      state.photos[sid].push(url);
-      // Update thumbnail
-      thumb.className = 'photo-thumb';
-      thumb.innerHTML = '<img src="' + url + '" style="width:72px;height:72px;object-fit:cover;border-radius:6px;cursor:pointer" onclick="window.open(this.src)">'
-        + '<button onclick="removePhoto(\'' + sid + '\',\'' + url + '\',this.parentNode)" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1">✕</button>';
-      thumb.style.position = 'relative';
-      saveDraft(); // веднага запазваме URL-а на снимката в черновата
-    } catch(err) {
-      thumb.innerHTML = '<div style="color:#C0392B;font-size:10px;padding:4px">❌ ' + err.message.slice(0,30) + '</div>';
-      console.error('Upload error:', err);
-    }
+    await uploadPhotoFile(file, sid, shop, date, thumb);
   }
   event.target.value = '';
 }
