@@ -1244,8 +1244,16 @@ function updateUploadStatus(sid) {
 
 
 // ── Изпращане на пълни бележки към Sheets (на части за неограничен размер) ──
-function sendNotesToSheets(shop, date, ts, st, generalComment) {
-  if (!st) return;
+function sendNotesToSheets(shop, date, ts, st, generalComment, onDone) {
+  // Викаме onDone точно веднъж — по всички пътища, включително ранните изходи
+  let doneCalled = false;
+  const done = () => {
+    if (doneCalled) return;
+    doneCalled = true;
+    if (typeof onDone === 'function') onDone();
+  };
+
+  if (!st) { done(); return; }
 
   // Събираме ВСИЧКИ бележки по сектори
   const sectorNotes = {}; // {sid: {notes:[], repeat:[], deadline:[]}}
@@ -1289,7 +1297,7 @@ function sendNotesToSheets(shop, date, ts, st, generalComment) {
     sectorNotes[sid].deadline.forEach(d => allDeadline.push(d));
   });
 
-  if (!allNotes.length && !allRepeat.length && !allDeadline.length && !generalComment) return;
+  if (!allNotes.length && !allRepeat.length && !allDeadline.length && !generalComment) { done(); return; }
 
   // Разбиваме в chunks по ~600 символа
   const chunks = [];
@@ -1312,13 +1320,14 @@ function sendNotesToSheets(shop, date, ts, st, generalComment) {
     });
   }
 
-  if (!chunks.length) return;
+  if (!chunks.length) { done(); return; }
   console.log('[ТеМАХ] Изпращане на бележки:', chunks.length, 'части...');
 
   let chunkIdx = 0;
   function sendNextChunk() {
     if (chunkIdx >= chunks.length) {
       console.log('[ТеМАХ] Всички бележки записани в Sheets ✅');
+      done();
       return;
     }
     const chunk = chunks[chunkIdx++];
@@ -1536,35 +1545,45 @@ function saveCheck() {
     showSyncNotification('✅ Изпратено успешно в базата!', 'success');
     lockCheckForm();
 
-    // Изпращаме снимките към Sheets
+    // Автоматичен имейл — тръгва СЛЕД като снимките и бележките са в Sheets,
+    // а не по таймер. Apps Script чете снимките от колона 66, затова редът
+    // трябва да е попълнен преди имейла.
+    const autoEmailUrl = sheetsUrl
+      + '?action=sendEmail'
+      + '&to='      + encodeURIComponent(emailTo)
+      + '&shop='    + encodeURIComponent(shop)
+      + '&date='    + encodeURIComponent(date)
+      + '&manager=' + encodeURIComponent(manager)
+      + '&ts='      + encodeURIComponent(savedTs || '');
+
+    let emailSent = false;
+    let emailFallback = null;
+    function sendAutoEmail(reason) {
+      if (emailSent) return;
+      emailSent = true;
+      if (emailFallback) { clearTimeout(emailFallback); emailFallback = null; }
+      if (!emailTo || pctVal === null) return;
+      console.log('[ТеМАХ] Имейл →', reason);
+      showSyncNotification('📧 Изпращане на имейл...', 'warning');
+      sendEmailWithRetry(autoEmailUrl, emailTo, 1);
+    }
+
+    // Предпазен таймер: ако веригата заседне (мъртъв callback, паднала мрежа),
+    // имейлът тръгва така или иначе — но само веднъж.
+    if (emailTo && pctVal !== null) {
+      emailFallback = setTimeout(function() {
+        sendAutoEmail('предпазен таймер 120 сек.');
+      }, 120000);
+    }
+
+    // Снимки → бележки → имейл
     const photoKeys = Object.keys(photosToSend || {}).filter(s => photosToSend[s] && photosToSend[s].length);
     console.log('[ТеМАХ] Callback fires. photosToSend sectors:', photoKeys.length);
-    if (photoKeys.length > 0) {
-      sendPhotosToSheets(shop, date, photosToSend, savedTs);
-    } else {
-      console.log('[ТеМАХ] Няма снимки за изпращане');
-    }
-    // Изпращаме пълните бележки (без лимит) — след снимките
-    setTimeout(function() {
-      sendNotesToSheets(shop, date, savedTs, entry.state, entry.generalComment || '');
-    }, 2000);
-
-    // Изпращаме имейл САМО след потвърждение, че данните са записани
-    if (emailTo && pctVal !== null) {
-      setTimeout(function() {
-        // Автоматичен имейл — използва sendEmailWithRetry за надеждност
-        // Снимките се четат от Sheets (колона 66) — URL-ът е кратък
-        const autoEmailUrl = sheetsUrl
-          + '?action=sendEmail'
-          + '&to='      + encodeURIComponent(emailTo)
-          + '&shop='    + encodeURIComponent(shop)
-          + '&date='    + encodeURIComponent(date)
-          + '&manager=' + encodeURIComponent(manager)
-          + '&ts='      + encodeURIComponent(savedTs || '');
-        showSyncNotification('📧 Изпращане на имейл...', 'warning');
-        sendEmailWithRetry(autoEmailUrl, emailTo, 1);
-      }, 15000); // 15 секунди — след като снимките са записани в Sheets
-    }
+    sendPhotosToSheets(shop, date, photosToSend, savedTs, function() {
+      sendNotesToSheets(shop, date, savedTs, entry.state, entry.generalComment || '', function() {
+        sendAutoEmail('снимките и бележките са записани');
+      });
+    });
   };
 
   // Запазваме копие на снимките ПРЕДИ да се изчистят от state
@@ -1832,15 +1851,23 @@ function removePhoto(sid, url, thumbEl) {
   if (thumbEl) thumbEl.remove();
 }
 
-function sendPhotosToSheets(shop, date, photos, ts) {
-  if (!photos || !Object.keys(photos).length) return;
+function sendPhotosToSheets(shop, date, photos, ts, onDone) {
+  // Викаме onDone точно веднъж — по всички пътища, включително ранните изходи
+  let doneCalled = false;
+  const done = () => {
+    if (doneCalled) return;
+    doneCalled = true;
+    if (typeof onDone === 'function') onDone();
+  };
+
+  if (!photos || !Object.keys(photos).length) { done(); return; }
   // Филтрираме само сектори със снимки
   const filtered = {};
   Object.keys(photos).forEach(sid => {
     if (photos[sid] && photos[sid].length) filtered[sid] = photos[sid];
   });
   const sids = Object.keys(filtered);
-  if (!sids.length) return;
+  if (!sids.length) { done(); return; }
 
   console.log('[ТеМАХ] sendPhotosToSheets:', sids.length, 'сектора, shop:', shop, 'date:', date, 'ts:', ts || '(няма)');
   console.log('[ТеМАХ] Photos data:', JSON.stringify(filtered).slice(0,200));
@@ -1852,6 +1879,7 @@ function sendPhotosToSheets(shop, date, photos, ts) {
     if (idx >= sids.length) {
       console.log('[ТеМАХ] Всички снимки са изпратени в Sheets');
     showSyncNotification('📷 Снимките са записани успешно!', 'success');
+      done();
       return;
     }
     const sid = sids[idx++];
